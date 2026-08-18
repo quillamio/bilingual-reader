@@ -12,6 +12,7 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Automatic publishing is intentionally gated by a [release] commit message.
   create-release:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
     uses: zotero-plugin-dev/workflows/.github/workflows/release-plugin.yml@main
