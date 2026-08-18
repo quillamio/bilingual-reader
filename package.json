@@ -1,33 +1,28 @@
 {
-  "name": "zotero-plugin-template",
+  "name": "zotero-bilingual-reader",
   "type": "module",
-  "version": "3.1.0",
-  "description": "Zotero Plugin Template",
+  "version": "0.1.0",
+  "description": "Zotero 10 PDF reading mode bilingual paragraph translator",
   "config": {
-    "addonName": "Zotero Plugin Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate"
+    "addonName": "Bilingual Reader",
+    "addonID": "bilingual-reader@zotero.local",
+    "addonRef": "bilingualreader",
+    "addonInstance": "BilingualReader",
+    "prefsPrefix": "extensions.zotero.bilingualreader"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "https://github.com/jokerhoneyyeah/zotero-bilingual-reader.git"
   },
-  "author": "windingwind",
-  "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
-  },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
+  "homepage": "https://github.com/jokerhoneyyeah/zotero-bilingual-reader",
+  "author": "Manus AI",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "zotero-plugin build && tsc --noEmit",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
-    "release": "zotero-plugin release",
-    "test": "zotero-plugin test",
-    "update-deps": "npm update --save"
+    "test": "zotero-plugin test"
   },
   "dependencies": {
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
@@ -46,18 +41,8 @@
     "zotero-types": "^4.1.0-beta.4"
   },
   "prettier": {
-    "printWidth": 80,
+    "printWidth": 100,
     "tabWidth": 2,
-    "endOfLine": "lf",
-    "overrides": [
-      {
-        "files": [
-          "*.xhtml"
-        ],
-        "options": {
-          "htmlWhitespaceSensitivity": "css"
-        }
-      }
-    ]
+    "endOfLine": "lf"
   }
 }
