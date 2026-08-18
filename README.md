@@ -1,70 +1,150 @@
 # Zotero Bilingual Reader
 
-Zotero Bilingual Reader 是一个面向 Zotero 10 的 PDF 段落中英对照阅读插件。
+Zotero Bilingual Reader 是一个面向 Zotero 10 的 PDF 段落中英对照阅读插件。它利用 Zotero 10 新 PDF 阅读模式中的结构化文档文本，把英文原文和中文译文按段落连续排列，适合论文精读。
 
-插件不会自己维护翻译服务，而是直接调用 [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate) 提供的公开翻译接口。因此，你在 Translate for Zotero 中已经配置好的 Google 翻译、DeepL、大语言模型接口或其他翻译服务，可以直接继续使用。
+从 v0.1.1 开始，插件支持两种翻译后端：
 
-本插件的主要目标不是“选中文字后翻译”，而是在 Zotero 10 新 PDF 阅读模式中，把英文原文和中文译文按段落连续排列，形成类似论文双语精读的阅读效果。
+1. **Translate for Zotero**：继续使用你已经配置好的翻译服务。
+2. **Ollama**：插件直接调用本机 Ollama 接口，可使用本地模型，也可使用 Ollama Cloud 模型。
 
 ## 主要功能
 
-- 支持 Zotero 10 PDF 阅读器。
-- 支持 macOS，也可用于 Windows 和 Linux。
-- 在 PDF 阅读器工具栏增加“中英”按钮。
-- 点击“中英”后自动尝试进入 Zotero 10 阅读模式。
-- 直接读取 Zotero 10 的结构化文档段落，而不是用空行猜测 PDF 段落。
+- 支持 Zotero 10.x 和 macOS。
+- 读取 Zotero 10 阅读模式中的真实结构化段落，不再通过空行猜测 PDF 段落。
 - 对正文、标题、图注和部分注释内容逐段翻译。
 - 中文译文直接显示在对应英文段落下方，并用左侧红色竖线区分。
-- 自动排除 Zotero 已识别的参考文献条目。
-- 翻译能力直接调用 Translate for Zotero 的当前默认翻译服务。
-- 已翻译段落会进行本地缓存，重复打开同一篇论文时减少重复翻译请求。
-- 再次点击“中英”可以临时关闭当前阅读页面中的译文显示。
+- 自动跳过 Zotero 已识别的参考文献。
+- 已完成译文会缓存，重复打开论文时减少重复请求。
+- 增加请求节流，避免连续高速调用公共翻译服务。
+- 连续失败 3 次后自动暂停，防止一个失效服务把整篇论文全部刷成错误信息。
+- 修复长时间翻译时因 Zotero 阅读视图重建而出现的 `can't access dead object` 问题：异步翻译不再长期持有旧的阅读器 DOM 节点，而是在写入结果前重新定位当前段落。
 
-## 运行要求
+## 工具栏按钮
 
-1. Zotero 10.x。
-2. Translate for Zotero 已安装并启用。
-3. Translate for Zotero 中至少已经配置一个可正常工作的翻译服务。
+打开 PDF 后，阅读器顶部会显示三个按钮：
 
-本插件本身不保存 Google、DeepL 或大语言模型的接口密钥。所有翻译服务配置仍由 Translate for Zotero 管理。
+- **中英**：开启或关闭段落中英对照。
+- **🔄**：取消当前翻译任务，删除“失败 / 正在翻译 / 已暂停”的结果，并使用当前翻译引擎重新翻译这些段落。已经成功并缓存的译文不会被删除。
+- **⚙**：选择翻译后端，并配置 Ollama 地址与模型。
 
-## macOS 安装方法
+如果必应、有道等服务突然失效，推荐操作顺序是：
 
-### 第一步：安装 Translate for Zotero
+1. 在 Translate for Zotero 中切换到新的可用服务，或点击 **⚙** 改用 Ollama。
+2. 回到论文阅读界面。
+3. 点击 **🔄**。
+4. 插件会停止旧任务，去掉失败结果，并使用新的翻译后端继续翻译。
 
-先安装并启用 Translate for Zotero：
+## 安装要求
+
+### 使用 Translate for Zotero
+
+需要：
+
+- Zotero 10.x；
+- Translate for Zotero 已安装并启用；
+- Translate for Zotero 中至少有一个可正常工作的翻译服务。
+
+Translate for Zotero：
 
 https://github.com/windingwind/zotero-pdf-translate
 
-安装后，进入 Translate for Zotero 的设置页面，确认翻译服务可以正常使用。
+Bilingual Reader 调用其公开接口：
 
-### 第二步：安装 Bilingual Reader
+```ts
+Zotero.PDFTranslate.api.translate(raw, {
+  pluginID,
+  itemID,
+  langto: "zh-CN",
+});
+```
 
-从本仓库的 Releases 页面下载最新版：
+插件每次发起新请求时都会读取 Translate for Zotero 当前默认服务。因此切换服务后，点击 **🔄** 即可让失败段落使用新服务重新翻译。
 
-`bilingual-reader-*.xpi`
+### 使用 Ollama
 
-在 macOS 的 Zotero 10 中：
+使用 Ollama 时，Translate for Zotero 不再是翻译必需项。
 
-1. 打开 Zotero。
-2. 进入“工具” → “插件”。
-3. 点击插件管理器右上角的齿轮按钮。
-4. 选择“从文件安装插件……”。
-5. 选择下载好的 `.xpi` 文件。
-6. 安装完成后，如 Zotero 提示重启，请重启 Zotero。
+先在 macOS 安装并启动 Ollama，然后确认本地接口可以访问：
 
-XPI 是 Zotero 插件包，不是 macOS 应用程序，因此不需要复制到“应用程序”文件夹，也不需要单独安装 `.dmg`。
+```text
+http://127.0.0.1:11434
+```
+
+在 Bilingual Reader 中点击 **⚙**：
+
+```text
+2 = Ollama
+```
+
+默认地址：
+
+```text
+http://127.0.0.1:11434
+```
+
+本地模型推荐从较小模型开始，例如：
+
+```text
+gpt-oss:20b
+```
+
+如果使用 Ollama Cloud，也可以填写：
+
+```text
+gpt-oss:120b-cloud
+```
+
+插件会直接请求：
+
+```text
+POST /api/chat
+```
+
+并要求模型只返回简体中文译文，同时保留基因、蛋白、药物、数字、单位、图表编号和参考文献标记。
+
+## 为什么 v0.1.1 更稳定
+
+v0.1.0 的主要问题是一次打开论文后会持续逐段请求翻译服务，并长期保存段落 DOM 对象。如果翻译期间 Zotero 切换阅读模式、刷新结构化页面、关闭 PDF 或重新创建内部 iframe，旧对象会失效，随后可能出现：
+
+```text
+can't access dead object
+```
+
+v0.1.1 做了以下修改：
+
+- 每个翻译任务拥有独立的运行代号；点击 **🔄**、关闭双语模式或关闭阅读器都会使旧任务立即失效。
+- 异步请求完成后，不直接操作旧 DOM 节点，而是根据 Zotero 的 `data-ref-path` 重新查找当前段落和译文块。
+- 如果阅读模式已经被替换，旧任务直接停止，不再继续写入失效对象。
+- 每个请求之间默认间隔约 650 毫秒，降低公共免费翻译服务触发限流的概率。
+- 连续 3 个段落失败后触发熔断，剩余段落显示“已暂停”，等待用户切换服务后点击 **🔄**。
+
+## macOS 安装方法
+
+从本仓库 Releases 下载最新版：
+
+```text
+bilingual-reader-*.xpi
+```
+
+然后在 Zotero 10 中：
+
+1. 打开“工具” → “插件”。
+2. 点击右上角齿轮。
+3. 选择“从文件安装插件……”。
+4. 选择 `.xpi` 文件。
+5. 如 Zotero 提示重启，请重启。
+
+XPI 是 Zotero 插件包，不是 macOS 应用程序，不需要拖入“应用程序”文件夹，也不需要 `.dmg`。
 
 ## 使用方法
 
-1. 在 Zotero 10 中打开一篇 PDF 论文。
-2. 在 PDF 阅读器顶部找到“中英”按钮。
-3. 点击“中英”。
-4. 插件会自动尝试启用 Zotero 10 的新阅读模式。
-5. Zotero 完成结构化文本加载后，插件开始逐段调用 Translate for Zotero。
-6. 中文译文会直接显示在对应英文段落下面。
+1. 在 Zotero 10 打开英文 PDF。
+2. 点击阅读器顶部 **中英**。
+3. 插件自动尝试进入 Zotero 10 阅读模式。
+4. 等待 Zotero 生成结构化文本。
+5. 中文译文会逐段出现在英文原文下面。
 
-显示效果大致如下：
+显示效果：
 
 ```text
 We discovered that PRMT9 knockdown enhanced STAT1 phosphorylation...
@@ -76,76 +156,38 @@ We further discovered that PRMT9 knockdown in THP1 cells...
 ┃ 我们进一步发现，在 THP1 细胞中敲低 PRMT9 后……
 ```
 
-再次点击“中英”，可以移除当前阅读页面中已经插入的中文译文；缓存不会因此删除。
-
-## 翻译服务如何选择
-
-Bilingual Reader 不单独提供翻译服务选择器。
-
-请直接在 Translate for Zotero 中选择你希望使用的服务。Bilingual Reader 调用：
-
-```ts
-Zotero.PDFTranslate.api.translate(raw, {
-  pluginID,
-  itemID,
-  langto: "zh-CN",
-});
-```
-
-如果没有明确传入 `service`，Translate for Zotero 会使用其当前默认翻译服务。
-
-因此，如果你想切换 Google 翻译、DeepL 或大语言模型，只需要修改 Translate for Zotero 的设置，不需要修改 Bilingual Reader。
-
-## Zotero 10 阅读模式实现方式
-
-Zotero 10 的新 PDF 阅读模式使用结构化文档文本，将 PDF 内容重新组织为可以连续阅读的 HTML 结构，例如：
-
-- 正文段落；
-- 标题；
-- 图注；
-- 表格；
-- 数学内容；
-- 图片；
-- 列表；
-- 参考文献。
-
-Bilingual Reader 读取阅读模式中带有 `data-ref-path` 的语义段落，再把译文插入到对应原文块之后。
-
-这比读取整个窗口的 `innerText` 后再根据空行切段更加可靠，尤其适合双栏医学和生物学论文。
-
 ## 缓存
 
-当前版本按照以下信息缓存译文：
+当前缓存依据：
 
 - Zotero PDF 条目；
 - 原文内容哈希；
 - 目标语言。
 
-如果原文没有改变，下一次打开论文时会优先读取缓存，从而减少重复翻译请求。
+**🔄 只清除失败、等待和暂停状态，不删除已经成功缓存的译文。**
 
 ## 当前限制
 
-这是早期版本，仍有以下限制：
-
 - 当前主要针对英文论文翻译为简体中文。
-- 表格单元格暂不进行逐格翻译。
+- 表格暂不逐单元格翻译。
 - 数学公式不会作为普通文本翻译。
-- 扫描版 PDF 是否可用，取决于 Zotero 结构化文本或文字识别结果。
-- 当前翻译按段落依次提交，超长论文第一次全文翻译可能需要一定时间。
-- Zotero 目前没有公开“阅读模式逐段扩展接口”，因此本插件需要访问 Zotero 10 阅读器内部的结构化阅读视图。Zotero 10 后续小版本如果修改内部实现，插件可能需要同步适配。
+- 扫描版 PDF 是否可用取决于 Zotero 的结构化文本 / 文字识别结果。
+- 第一次翻译长论文仍需要时间；插件目前采用单请求串行 + 节流，而不是一次把整篇论文发送给服务。
+- Zotero 当前没有公开“阅读模式逐段扩展接口”，因此插件仍需要访问 Zotero 10 阅读器内部的结构化阅读视图。Zotero 10 后续版本改变内部实现时可能需要适配。
+- macOS 系统自带的 Apple Translation Framework 不能直接从 Zotero 的 JavaScript 插件环境稳定调用；如果需要完全本地、离线且不依赖公共翻译接口，当前更推荐 Ollama 本地模型。
 
 ## macOS 兼容性
 
-插件代码不依赖 Windows 注册表、Windows 路径、可执行文件或平台专用动态库。
+插件不依赖 Windows 注册表、Windows 路径、独立可执行文件或平台专用动态库。
 
-插件的 `manifest.json` 当前限定：
+`manifest.json` 限定：
 
 ```json
 "strict_min_version": "10.0",
 "strict_max_version": "10.*"
 ```
 
-因此发布版目标为 Zotero 10.x。项目持续集成同时在 Linux 和 macOS 环境执行构建检查，以尽早发现平台相关的构建问题。
+持续集成同时在 Linux 与 macOS 环境执行构建检查。
 
 ## 开发与构建
 
@@ -154,29 +196,8 @@ npm install
 npm run build
 ```
 
-构建产物由 `zotero-plugin-scaffold` 生成。
-
-正式发布的 XPI 请优先从 GitHub Releases 下载，不建议直接使用仓库中历史遗留的手工构建文件。
-
-## 项目结构
-
-```text
-src/
-├── index.ts
-├── addon.ts
-├── hooks.ts
-└── bilingualReader.ts
-```
-
-其中：
-
-- `hooks.ts`：负责插件启动、关闭以及阅读器事件注册；
-- `bilingualReader.ts`：负责 Zotero 10 阅读模式访问、段落识别、Translate for Zotero 调用、译文插入和缓存；
-- `addon.ts`：插件实例；
-- `index.ts`：插件入口。
+正式 XPI 请优先从 GitHub Releases 下载。
 
 ## 许可证
 
 AGPL-3.0-or-later。
-
-本项目调用 Translate for Zotero 的公开接口；Translate for Zotero 本身同样采用 AGPL-3.0-or-later 许可证。
