@@ -2,6 +2,7 @@ const PLUGIN_ID = "bilingual-reader@zotero.local";
 const BASE = "extensions.zotero.bilingualreader";
 const TARGET_LANG = "zh-CN";
 const TRANSLATION_CLASS = "bilingual-reader-translation";
+const TOOLBAR_BUTTON_CLASS = "bilingual-reader-toolbar-button";
 const STYLE_ID = "bilingual-reader-style";
 
 interface ReaderParagraph {
@@ -69,6 +70,10 @@ function getSDTDocument(reader: any): Document | null {
   return view?._iframeDocument || view?._iframe?.contentDocument || null;
 }
 
+function getDocumentRoot(doc: Document): HTMLElement | null {
+  return doc.documentElement as HTMLElement | null;
+}
+
 async function ensureReadingMode(reader: any): Promise<Document> {
   let doc = getSDTDocument(reader);
   if (doc?.querySelector("#sdt-content")) return doc;
@@ -117,16 +122,23 @@ function installStyles(doc: Document): void {
       opacity: 0.75;
     }
   `;
-  doc.head.append(style);
+
+  const target = doc.head || doc.documentElement;
+  target?.append(style);
 }
 
 function isTranslatableElement(element: HTMLElement): boolean {
   if (element.closest(".sdt-reference")) return false;
   if (element.closest(`.${TRANSLATION_CLASS}`)) return false;
-  if ((element as any).hidden) return false;
+  if (element.hidden) return false;
 
   const tag = element.tagName.toLowerCase();
-  if (tag === "li" && element.querySelector("p[data-ref-path], h1[data-ref-path], h2[data-ref-path], h3[data-ref-path], h4[data-ref-path], h5[data-ref-path], h6[data-ref-path]")) {
+  if (
+    tag === "li" &&
+    element.querySelector(
+      "p[data-ref-path], h1[data-ref-path], h2[data-ref-path], h3[data-ref-path], h4[data-ref-path], h5[data-ref-path], h6[data-ref-path]",
+    )
+  ) {
     return false;
   }
   return true;
@@ -146,18 +158,18 @@ function collectParagraphs(doc: Document, itemKey: string): ReaderParagraph[] {
     "#sdt-content li[data-ref-path]",
   ].join(",");
 
-  const elements = Array.from(doc.querySelectorAll<HTMLElement>(selector));
+  const elements = Array.from(doc.querySelectorAll(selector)) as HTMLElement[];
   const paragraphs: ReaderParagraph[] = [];
 
   for (const element of elements) {
     if (!isTranslatableElement(element)) continue;
+
     const sourceText = (element.textContent || "").replace(/\s+/g, " ").trim();
     if (sourceText.length < 2) continue;
 
-    const refPath = element.dataset.refPath || "";
     paragraphs.push({
       element,
-      refPath,
+      refPath: element.dataset.refPath || "",
       sourceText,
       translation: loadCached(itemKey, sourceText),
     });
@@ -169,7 +181,7 @@ function collectParagraphs(doc: Document, itemKey: string): ReaderParagraph[] {
 function createTranslationBlock(doc: Document, paragraph: ReaderParagraph): HTMLDivElement {
   const block = doc.createElement("div");
   block.className = TRANSLATION_CLASS;
-  block.lang = "zh-CN";
+  block.lang = TARGET_LANG;
   block.dataset.sourceRefPath = paragraph.refPath;
 
   if (paragraph.translation) {
@@ -185,10 +197,13 @@ function createTranslationBlock(doc: Document, paragraph: ReaderParagraph): HTML
 }
 
 function clearTranslations(doc: Document): void {
-  for (const node of Array.from(doc.querySelectorAll(`.${TRANSLATION_CLASS}`))) {
+  const nodes = Array.from(doc.querySelectorAll(`.${TRANSLATION_CLASS}`)) as HTMLElement[];
+  for (const node of nodes) {
     node.remove();
   }
-  delete doc.documentElement.dataset.bilingualReaderRunning;
+
+  const root = getDocumentRoot(doc);
+  if (root) delete root.dataset.bilingualReaderRunning;
 }
 
 function showError(reader: any, message: string): void {
@@ -198,6 +213,7 @@ function showError(reader: any, message: string): void {
   } catch (_) {
     // Fall through to the Zotero main window.
   }
+
   try {
     Zotero.getMainWindow()?.alert(message);
   } catch (_) {
@@ -208,14 +224,16 @@ function showError(reader: any, message: string): void {
 export async function toggleBilingualReading(reader: any): Promise<void> {
   try {
     const doc = await ensureReadingMode(reader);
+    const root = getDocumentRoot(doc);
+    if (!root) throw new Error("无法访问 Zotero 阅读模式页面。");
 
     if (doc.querySelector(`.${TRANSLATION_CLASS}`)) {
       clearTranslations(doc);
       return;
     }
 
-    if (doc.documentElement.dataset.bilingualReaderRunning === "true") return;
-    doc.documentElement.dataset.bilingualReaderRunning = "true";
+    if (root.dataset.bilingualReaderRunning === "true") return;
+    root.dataset.bilingualReaderRunning = "true";
     installStyles(doc);
 
     const itemID = Number(reader?.itemID || 0);
@@ -223,8 +241,6 @@ export async function toggleBilingualReading(reader: any): Promise<void> {
     const itemKey = String(item?.key || reader?.itemKey || itemID || "reader");
     if (!itemID) throw new Error("无法取得当前 PDF 的 Zotero 条目编号。");
 
-    // Ask Zotero 10 to prepare the native Structured Document Text data first.
-    // This is the same semantic document structure used by the new PDF Reading Mode.
     try {
       await (Zotero as any).SDT?.ensure?.(itemID, { isPriority: true });
     } catch (error) {
@@ -250,6 +266,7 @@ export async function toggleBilingualReading(reader: any): Promise<void> {
         const translation = await translateText(paragraph.sourceText, itemID);
         paragraph.translation = translation;
         saveCached(itemKey, paragraph.sourceText, translation);
+
         if (block.isConnected) {
           block.dataset.state = "done";
           block.textContent = translation;
@@ -265,22 +282,25 @@ export async function toggleBilingualReading(reader: any): Promise<void> {
     showError(reader, error?.message || String(error));
   } finally {
     const doc = getSDTDocument(reader);
-    if (doc) delete doc.documentElement.dataset.bilingualReaderRunning;
+    const root = doc ? getDocumentRoot(doc) : null;
+    if (root) delete root.dataset.bilingualReaderRunning;
   }
 }
 
 function renderToolbar(event: any): void {
   const { reader, doc, append } = event || {};
   if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
-  if (doc.querySelector(".bilingual-reader-toolbar-button")) return;
+  if (doc.querySelector(`.${TOOLBAR_BUTTON_CLASS}`)) return;
 
   const button = doc.createElement("button");
-  button.className = "toolbar-button bilingual-reader-toolbar-button";
+  button.className = `toolbar-button ${TOOLBAR_BUTTON_CLASS}`;
   button.type = "button";
   button.tabIndex = -1;
   button.textContent = "中英";
   button.title = "中英段落对照（调用 Translate for Zotero）";
   button.setAttribute("aria-label", button.title);
+  button.style.minWidth = "36px";
+  button.style.paddingInline = "6px";
   button.addEventListener("click", (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -290,10 +310,28 @@ function renderToolbar(event: any): void {
   append(button);
 }
 
+function cleanupReader(reader: any): void {
+  const sdtDoc = getSDTDocument(reader);
+  if (sdtDoc) clearTranslations(sdtDoc);
+
+  const toolbarDoc = reader?._iframeWindow?.document as Document | undefined;
+  const buttons = toolbarDoc
+    ? (Array.from(toolbarDoc.querySelectorAll(`.${TOOLBAR_BUTTON_CLASS}`)) as HTMLElement[])
+    : [];
+  for (const button of buttons) {
+    button.remove();
+  }
+}
+
 export function registerBilingualReader(): void {
   Zotero.Reader.registerEventListener("renderToolbar", renderToolbar, PLUGIN_ID);
 }
 
 export function unregisterBilingualReader(): void {
   Zotero.Reader.unregisterEventListener("renderToolbar", renderToolbar);
+
+  const readers = ((Zotero.Reader as any)._readers || []) as any[];
+  for (const reader of readers) {
+    cleanupReader(reader);
+  }
 }
