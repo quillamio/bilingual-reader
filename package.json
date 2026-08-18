@@ -15,7 +15,7 @@
     "url": "https://github.com/jokerhoneyyeah/bilingual-reader.git"
   },
   "homepage": "https://github.com/jokerhoneyyeah/bilingual-reader",
-  "author": "Manus AI",
+  "author": "jokerhoneyyeah",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
