@@ -20,7 +20,13 @@ jobs:
         run: npm run lint:check
 
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
     env:
       GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
     steps:
@@ -31,7 +37,7 @@ jobs:
       - name: Upload build result
         uses: actions/upload-artifact@v4
         with:
-          name: build-result
+          name: build-result-${{ matrix.os }}
           path: .scaffold/build
 
   test:
