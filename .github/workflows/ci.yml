@@ -62,13 +62,41 @@ jobs:
     permissions:
       contents: write
     env:
+      GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
         with:
           fetch-all: true
-      - name: Build release XPI
+      - name: Build release files
         run: npm run build
-      - name: Publish GitHub Release
-        run: npm run release
+      - name: Publish versioned XPI release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          XPI=".scaffold/build/bilingual-reader.xpi"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$XPI" --clobber
+          else
+            gh release create "$TAG" "$XPI" \
+              --target "$GITHUB_SHA" \
+              --title "Bilingual Reader ${TAG}" \
+              --notes "Zotero 10 PDF 阅读模式段落中英对照翻译插件。直接调用 Translate for Zotero 的翻译服务，并已通过 macOS 与 Linux 构建检查。"
+          fi
+      - name: Publish Zotero update metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPDATE_JSON=".scaffold/build/update.json"
+          UPDATE_BETA_JSON=".scaffold/build/update-beta.json"
+          if gh release view release >/dev/null 2>&1; then
+            gh release upload release "$UPDATE_JSON" "$UPDATE_BETA_JSON" --clobber
+          else
+            gh release create release "$UPDATE_JSON" "$UPDATE_BETA_JSON" \
+              --target "$GITHUB_SHA" \
+              --title "Bilingual Reader 更新元数据" \
+              --notes "供 Zotero 自动更新使用的 update.json 与 update-beta.json。"
+          fi
