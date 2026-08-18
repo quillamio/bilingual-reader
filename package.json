@@ -12,9 +12,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jokerhoneyyeah/zotero-bilingual-reader.git"
+    "url": "https://github.com/jokerhoneyyeah/bilingual-reader.git"
   },
-  "homepage": "https://github.com/jokerhoneyyeah/zotero-bilingual-reader",
+  "homepage": "https://github.com/jokerhoneyyeah/bilingual-reader",
   "author": "Manus AI",
   "license": "AGPL-3.0-or-later",
   "scripts": {
