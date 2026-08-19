@@ -4,6 +4,16 @@ import {
   registerBilingualReader,
   unregisterBilingualReader,
 } from "./bilingualReader";
+import { registerPrefsScripts } from "./modules/preferenceScript";
+
+function registerPreferencesPane(): void {
+  Zotero.PreferencePanes.register({
+    pluginID: addon.data.config.addonID,
+    src: rootURI + "content/preferences.xhtml",
+    label: "中英对照",
+    image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
+  });
+}
 
 async function onStartup() {
   await Promise.all([
@@ -13,6 +23,7 @@ async function onStartup() {
   ]);
 
   initLocale();
+  registerPreferencesPane();
   registerBilingualReader();
 
   await Promise.all(
@@ -48,8 +59,10 @@ async function onNotify(
   // Reserved for future Zotero notifier integration.
 }
 
-async function onPrefsEvent(_type: string, _data: { [key: string]: any }) {
-  // Reserved for a future settings page.
+async function onPrefsEvent(type: string, data: { [key: string]: any }) {
+  if (type === "load" && data.window) {
+    await registerPrefsScripts(data.window as Window);
+  }
 }
 
 function onShortcuts(_type: string) {
