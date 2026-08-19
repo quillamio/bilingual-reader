@@ -1,38 +1,200 @@
 # Zotero Bilingual Reader
 
-Zotero Bilingual Reader 是一个面向 Zotero 10 的 PDF 段落中英对照阅读插件。它利用 Zotero 10 新 PDF 阅读模式中的结构化文档文本，把英文原文和中文译文按段落连续排列，适合论文精读。
+Zotero Bilingual Reader 是一个面向 Zotero 10 的 PDF 段落中英对照阅读插件。它利用 Zotero 10 新 PDF 阅读模式中的结构化文档文本，把英文原文和中文译文按段落连续排列，适合医学、生物学及其他英文论文精读。
 
-从 v0.1.1 开始，插件支持两种翻译后端：
+## v0.1.2 重点修复
 
-1. **Translate for Zotero**：继续使用你已经配置好的翻译服务。
-2. **Ollama**：插件直接调用本机 Ollama 接口，可使用本地模型，也可使用 Ollama Cloud 模型。
+v0.1.2 主要解决两个实际使用问题：
+
+1. **Zotero 设置中没有插件设置页**：现在插件会正式注册 `PreferencePanes`，可在 **Zotero 设置 → 中英对照** 中统一配置翻译后端。
+2. **翻译失败后点击 🔄 仍然保留错误结果**：现在会检查 Translate for Zotero 返回任务的 `status`；失败任务不会再被当成成功译文缓存。点击 🔄 时会先移除当前译文块，再恢复当前后端的成功缓存并重新翻译未成功段落。
+
+同时增加：
+
+- Translate for Zotero / Ollama 两种后端切换；
+- 可直接指定 Translate for Zotero 的具体服务，或跟随其当前默认服务；
+- Ollama 地址、模型设置与连接测试；
+- 段落请求间隔、连续失败阈值设置；
+- 新的 v2 缓存命名空间，会区分翻译后端、Translate for Zotero 指定服务以及 Ollama 模型；
+- 兼容清理 v0.1.1 中可能被错误缓存的 `[请求错误]`、`此翻译服务不可用`、`Request error` 等错误文本。
 
 ## 主要功能
 
 - 支持 Zotero 10.x 和 macOS。
-- 读取 Zotero 10 阅读模式中的真实结构化段落，不再通过空行猜测 PDF 段落。
+- 读取 Zotero 10 阅读模式中的真实结构化段落，不通过空行猜测 PDF 段落。
 - 对正文、标题、图注和部分注释内容逐段翻译。
-- 中文译文直接显示在对应英文段落下方，并用左侧红色竖线区分。
+- 中文译文直接显示在对应英文段落下方，并以左侧竖线区分。
 - 自动跳过 Zotero 已识别的参考文献。
 - 已完成译文会缓存，重复打开论文时减少重复请求。
-- 增加请求节流，避免连续高速调用公共翻译服务。
-- 连续失败 3 次后自动暂停，防止一个失效服务把整篇论文全部刷成错误信息。
-- 修复长时间翻译时因 Zotero 阅读视图重建而出现的 `can't access dead object` 问题：异步翻译不再长期持有旧的阅读器 DOM 节点，而是在写入结果前重新定位当前段落。
+- 支持 Translate for Zotero 和 Ollama。
+- 支持请求节流和连续失败熔断。
+- 避免长时间翻译时因 Zotero 阅读视图重建而持续访问失效 DOM，降低 `can't access dead object` 错误。
+
+## Zotero 设置页
+
+安装 v0.1.2 后，进入：
+
+```text
+Zotero → 设置 → 中英对照
+```
+
+可以配置以下内容。
+
+### 翻译后端
+
+```text
+Translate for Zotero
+Ollama
+```
+
+### Translate for Zotero
+
+插件会通过 Translate for Zotero 官方公开接口：
+
+```ts
+Zotero.PDFTranslate.api.translate(raw, {
+  pluginID,
+  itemID,
+  langto: "zh-CN",
+  service,
+});
+```
+
+在设置页可以选择：
+
+```text
+跟随 Translate for Zotero 当前默认服务
+```
+
+或者直接指定 Translate for Zotero 已注册的某一个翻译服务。
+
+服务本身的密钥、额度、接口地址和高级参数仍由 Translate for Zotero 管理。
+
+### Ollama
+
+默认地址：
+
+```text
+http://127.0.0.1:11434
+```
+
+默认模型：
+
+```text
+gpt-oss:20b
+```
+
+也可以使用其他已安装模型或 Ollama Cloud 模型，例如：
+
+```text
+gpt-oss:120b-cloud
+```
+
+设置页提供 **测试 Ollama 连接** 按钮，会请求：
+
+```text
+GET /api/tags
+```
+
+翻译时调用：
+
+```text
+POST /api/chat
+```
+
+### 稳定性参数
+
+默认段落请求间隔：
+
+```text
+650 ms
+```
+
+如果使用容易限流的免费网页翻译服务，可以适当提高到：
+
+```text
+800–1200 ms
+```
+
+默认连续失败：
+
+```text
+3 次
+```
+
+达到阈值后自动暂停剩余段落，避免一个失效服务连续请求整篇论文。
 
 ## 工具栏按钮
 
-打开 PDF 后，阅读器顶部会显示三个按钮：
+PDF 阅读器顶部显示：
 
-- **中英**：开启或关闭段落中英对照。
-- **🔄**：取消当前翻译任务，删除“失败 / 正在翻译 / 已暂停”的结果，并使用当前翻译引擎重新翻译这些段落。已经成功并缓存的译文不会被删除。
-- **⚙**：选择翻译后端，并配置 Ollama 地址与模型。
+- **中英**：开启 / 关闭段落中英对照。
+- **🔄**：取消当前任务，移除当前页面中的旧译文块，然后按当前设置重新整理译文。
+- **⚙**：快速切换 Translate for Zotero / Ollama；完整设置建议使用 Zotero 设置页。
 
-如果必应、有道等服务突然失效，推荐操作顺序是：
+## 🔄 在 v0.1.2 中如何工作
 
-1. 在 Translate for Zotero 中切换到新的可用服务，或点击 **⚙** 改用 Ollama。
-2. 回到论文阅读界面。
-3. 点击 **🔄**。
-4. 插件会停止旧任务，去掉失败结果，并使用新的翻译后端继续翻译。
+旧版本存在一个关键问题：Translate for Zotero 的公开 API 在服务请求失败时，可能返回：
+
+```text
+status = "fail"
+result = "[请求错误] ..."
+```
+
+如果只判断 `result` 是否为空，就会错误地把报错文字当成“成功译文”写入缓存。之后即使换了翻译服务，再点击 🔄，插件仍然从缓存加载同一段错误文字。
+
+v0.1.2 改为：
+
+```text
+Translate for Zotero 返回任务
+        ↓
+检查 task.status
+        ↓
+status = success
+        ↓
+才允许写入缓存
+
+status = fail
+        ↓
+显示失败提示
+        ↓
+绝不写入成功缓存
+```
+
+点击 🔄 时：
+
+```text
+取消旧翻译任务
+        ↓
+移除当前所有中文译文块
+        ↓
+重新读取当前翻译后端 / 服务 / 模型
+        ↓
+恢复该后端真正成功的缓存
+        ↓
+重新翻译其余段落
+```
+
+因此，如果必应失效后改成 DeepL、Google、其他 Translate for Zotero 服务或 Ollama，点击 🔄 后旧错误提示应立即消失，并由新的翻译结果替换。
+
+## 缓存
+
+v0.1.2 使用新的缓存命名空间，主要包含：
+
+```text
+PDF 条目
++ 翻译后端
++ Translate for Zotero 指定服务 / Ollama 地址与模型
++ 原文哈希
++ 目标语言
+```
+
+因此：
+
+- Translate for Zotero → Ollama：不会误用旧后端译文；
+- Ollama 更换模型：使用新的缓存；
+- Translate for Zotero 指定另一个服务：使用新的缓存；
+- 同一后端、同一模型和同一段落：继续利用已有成功缓存。
 
 ## 安装要求
 
@@ -42,81 +204,23 @@ Zotero Bilingual Reader 是一个面向 Zotero 10 的 PDF 段落中英对照阅�
 
 - Zotero 10.x；
 - Translate for Zotero 已安装并启用；
-- Translate for Zotero 中至少有一个可正常工作的翻译服务。
+- 至少一个可正常工作的翻译服务。
 
 Translate for Zotero：
 
 https://github.com/windingwind/zotero-pdf-translate
 
-Bilingual Reader 调用其公开接口：
-
-```ts
-Zotero.PDFTranslate.api.translate(raw, {
-  pluginID,
-  itemID,
-  langto: "zh-CN",
-});
-```
-
-插件每次发起新请求时都会读取 Translate for Zotero 当前默认服务。因此切换服务后，点击 **🔄** 即可让失败段落使用新服务重新翻译。
-
 ### 使用 Ollama
 
-使用 Ollama 时，Translate for Zotero 不再是翻译必需项。
+如果选择 Ollama，翻译过程不依赖 Translate for Zotero。
 
-先在 macOS 安装并启动 Ollama，然后确认本地接口可以访问：
-
-```text
-http://127.0.0.1:11434
-```
-
-在 Bilingual Reader 中点击 **⚙**：
+在 macOS 上安装并启动 Ollama 后，将地址与模型填写到：
 
 ```text
-2 = Ollama
+Zotero → 设置 → 中英对照
 ```
 
-默认地址：
-
-```text
-http://127.0.0.1:11434
-```
-
-本地模型推荐从较小模型开始，例如：
-
-```text
-gpt-oss:20b
-```
-
-如果使用 Ollama Cloud，也可以填写：
-
-```text
-gpt-oss:120b-cloud
-```
-
-插件会直接请求：
-
-```text
-POST /api/chat
-```
-
-并要求模型只返回简体中文译文，同时保留基因、蛋白、药物、数字、单位、图表编号和参考文献标记。
-
-## 为什么 v0.1.1 更稳定
-
-v0.1.0 的主要问题是一次打开论文后会持续逐段请求翻译服务，并长期保存段落 DOM 对象。如果翻译期间 Zotero 切换阅读模式、刷新结构化页面、关闭 PDF 或重新创建内部 iframe，旧对象会失效，随后可能出现：
-
-```text
-can't access dead object
-```
-
-v0.1.1 做了以下修改：
-
-- 每个翻译任务拥有独立的运行代号；点击 **🔄**、关闭双语模式或关闭阅读器都会使旧任务立即失效。
-- 异步请求完成后，不直接操作旧 DOM 节点，而是根据 Zotero 的 `data-ref-path` 重新查找当前段落和译文块。
-- 如果阅读模式已经被替换，旧任务直接停止，不再继续写入失效对象。
-- 每个请求之间默认间隔约 650 毫秒，降低公共免费翻译服务触发限流的概率。
-- 连续 3 个段落失败后触发熔断，剩余段落显示“已暂停”，等待用户切换服务后点击 **🔄**。
+然后点击 **测试 Ollama 连接**。
 
 ## macOS 安装方法
 
@@ -126,7 +230,7 @@ v0.1.1 做了以下修改：
 bilingual-reader-*.xpi
 ```
 
-然后在 Zotero 10 中：
+在 Zotero 10 中：
 
 1. 打开“工具” → “插件”。
 2. 点击右上角齿轮。
@@ -134,7 +238,7 @@ bilingual-reader-*.xpi
 4. 选择 `.xpi` 文件。
 5. 如 Zotero 提示重启，请重启。
 
-XPI 是 Zotero 插件包，不是 macOS 应用程序，不需要拖入“应用程序”文件夹，也不需要 `.dmg`。
+XPI 是 Zotero 插件包，不是 macOS 应用程序，不需要拖入“应用程序”文件夹。
 
 ## 使用方法
 
@@ -142,7 +246,7 @@ XPI 是 Zotero 插件包，不是 macOS 应用程序，不需要拖入“应用�
 2. 点击阅读器顶部 **中英**。
 3. 插件自动尝试进入 Zotero 10 阅读模式。
 4. 等待 Zotero 生成结构化文本。
-5. 中文译文会逐段出现在英文原文下面。
+5. 中文译文逐段显示在英文原文下方。
 
 显示效果：
 
@@ -156,29 +260,18 @@ We further discovered that PRMT9 knockdown in THP1 cells...
 ┃ 我们进一步发现，在 THP1 细胞中敲低 PRMT9 后……
 ```
 
-## 缓存
-
-当前缓存依据：
-
-- Zotero PDF 条目；
-- 原文内容哈希；
-- 目标语言。
-
-**🔄 只清除失败、等待和暂停状态，不删除已经成功缓存的译文。**
-
 ## 当前限制
 
 - 当前主要针对英文论文翻译为简体中文。
 - 表格暂不逐单元格翻译。
 - 数学公式不会作为普通文本翻译。
 - 扫描版 PDF 是否可用取决于 Zotero 的结构化文本 / 文字识别结果。
-- 第一次翻译长论文仍需要时间；插件目前采用单请求串行 + 节流，而不是一次把整篇论文发送给服务。
-- Zotero 当前没有公开“阅读模式逐段扩展接口”，因此插件仍需要访问 Zotero 10 阅读器内部的结构化阅读视图。Zotero 10 后续版本改变内部实现时可能需要适配。
-- macOS 系统自带的 Apple Translation Framework 不能直接从 Zotero 的 JavaScript 插件环境稳定调用；如果需要完全本地、离线且不依赖公共翻译接口，当前更推荐 Ollama 本地模型。
+- 第一次翻译长论文仍需要时间；当前以单请求串行方式运行，优先保证稳定性。
+- Zotero 当前没有公开“阅读模式逐段扩展接口”，因此插件需要访问 Zotero 10 阅读器内部的结构化阅读视图。Zotero 后续修改内部实现时可能仍需适配。
 
 ## macOS 兼容性
 
-插件不依赖 Windows 注册表、Windows 路径、独立可执行文件或平台专用动态库。
+插件不依赖 Windows 注册表、Windows 路径或平台专用动态库。
 
 `manifest.json` 限定：
 

@@ -1,5 +1,104 @@
-<linkset><html:link rel="localization" href="__addonRef__-preferences.ftl" /></linkset>
-<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })">
-  <label><html:h2>中英对照阅读 / Bilingual Reader</html:h2></label>
-  <label>本插件不重复实现翻译服务。请先安装并启用 Translate for Zotero（zotero-pdf-translate），再在该插件的设置中选择 Google Translate 或 OpenAI-compatible API。</label>
-</groupbox>
+<linkset>
+  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+</linkset>
+
+<vbox
+  id="bilingualreader-settings-root"
+  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
+  style="max-width: 760px;"
+>
+  <groupbox>
+    <label><html:h2>中英对照阅读</html:h2></label>
+    <html:p style="margin: 0 0 12px 0; line-height: 1.6;">
+      在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。可以选择调用 Translate for Zotero，也可以直接调用 Ollama。
+    </html:p>
+
+    <hbox align="center" style="margin-bottom: 10px;">
+      <html:label for="bilingualreader-engine" style="min-width: 110px;">翻译后端</html:label>
+      <html:select id="bilingualreader-engine" style="min-width: 300px; padding: 4px 8px;">
+        <html:option value="pdftranslate">Translate for Zotero</html:option>
+        <html:option value="ollama">Ollama</html:option>
+      </html:select>
+    </hbox>
+  </groupbox>
+
+  <groupbox id="bilingualreader-pdftranslate-section">
+    <label><html:h3>Translate for Zotero</html:h3></label>
+    <html:p id="bilingualreader-pdftranslate-status" style="line-height: 1.6; margin: 0 0 10px 0;"></html:p>
+
+    <hbox align="center" style="margin-bottom: 8px;">
+      <html:label for="bilingualreader-pdftranslate-service" style="min-width: 110px;">翻译服务</html:label>
+      <html:select
+        id="bilingualreader-pdftranslate-service"
+        style="min-width: 360px; max-width: 520px; padding: 4px 8px;"
+      >
+        <html:option value="">跟随 Translate for Zotero 当前默认服务</html:option>
+      </html:select>
+    </hbox>
+
+    <html:p style="line-height: 1.6; margin: 0;">
+      如果直接指定某个服务，Bilingual Reader 会把该服务编号传给 Translate for Zotero；如果选择“跟随默认服务”，则继续使用 Translate for Zotero 自己设置的当前默认服务。服务本身的密钥、额度和其他参数仍由 Translate for Zotero 管理。
+    </html:p>
+  </groupbox>
+
+  <groupbox id="bilingualreader-ollama-section">
+    <label><html:h3>Ollama</html:h3></label>
+
+    <hbox align="center" style="margin-bottom: 8px;">
+      <html:label for="bilingualreader-ollama-url" style="min-width: 110px;">服务地址</html:label>
+      <html:input
+        id="bilingualreader-ollama-url"
+        type="text"
+        style="width: 420px; padding: 4px 6px;"
+        placeholder="http://127.0.0.1:11434"
+      />
+    </hbox>
+
+    <hbox align="center" style="margin-bottom: 8px;">
+      <html:label for="bilingualreader-ollama-model" style="min-width: 110px;">模型</html:label>
+      <html:input
+        id="bilingualreader-ollama-model"
+        type="text"
+        style="width: 420px; padding: 4px 6px;"
+        placeholder="gpt-oss:20b"
+      />
+    </hbox>
+
+    <hbox align="center">
+      <spacer width="110" />
+      <html:button id="bilingualreader-test-ollama" type="button" style="padding: 5px 12px;">
+        测试 Ollama 连接
+      </html:button>
+    </hbox>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h3>稳定性</html:h3></label>
+
+    <hbox align="center" style="margin-bottom: 8px;">
+      <html:label for="bilingualreader-request-gap" style="min-width: 180px;">段落请求间隔（毫秒）</html:label>
+      <html:input id="bilingualreader-request-gap" type="number" min="0" max="10000" step="50" style="width: 120px; padding: 4px 6px;" />
+      <html:span style="margin-left: 10px;">建议 500–1200；免费网页翻译服务可适当调高。</html:span>
+    </hbox>
+
+    <hbox align="center" style="margin-bottom: 10px;">
+      <html:label for="bilingualreader-max-errors" style="min-width: 180px;">连续失败后暂停</html:label>
+      <html:input id="bilingualreader-max-errors" type="number" min="1" max="20" step="1" style="width: 120px; padding: 4px 6px;" />
+      <html:span style="margin-left: 10px;">建议 3 次，避免失效服务持续请求整篇论文。</html:span>
+    </hbox>
+
+    <hbox align="center">
+      <html:button id="bilingualreader-save" type="button" style="padding: 6px 16px;">
+        保存设置
+      </html:button>
+      <html:span id="bilingualreader-settings-status" style="margin-left: 12px; line-height: 1.5;"></html:span>
+    </hbox>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h3>刷新说明</html:h3></label>
+    <html:p style="line-height: 1.6; margin: 0;">
+      修改翻译后端或翻译服务后，回到 PDF 阅读器点击 🔄。新版会先移除当前页面中的旧译文块，再恢复当前后端已经成功缓存的结果，并重新翻译其余段落。失败提示不会继续作为“成功译文”保留；切换 Translate for Zotero 的指定服务、切换到 Ollama 或更换 Ollama 模型时，也会使用不同的缓存命名空间。
+    </html:p>
+  </groupbox>
+</vbox>
