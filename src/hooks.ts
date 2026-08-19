@@ -6,12 +6,12 @@ import {
 } from "./bilingualReader";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 
-function registerPreferencesPane(): void {
-  Zotero.PreferencePanes.register({
+async function registerPreferencesPane(): Promise<void> {
+  await Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
-    src: rootURI + "content/preferences.xhtml",
+    id: "bilingual-reader-preferences",
+    src: "content/preferences.xhtml",
     label: "中英对照",
-    image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
   });
 }
 
@@ -23,7 +23,7 @@ async function onStartup() {
   ]);
 
   initLocale();
-  registerPreferencesPane();
+  await registerPreferencesPane();
   registerBilingualReader();
 
   await Promise.all(

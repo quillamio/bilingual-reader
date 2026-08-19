@@ -3,11 +3,14 @@ import {
   DEFAULT_OLLAMA_URL,
   getCacheEngineTag,
   getEngine,
+  getMaxCharsPerRequest,
+  getMaxConcurrent,
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
   getPDFTranslateService,
   getRequestGapMs,
+  getSkipLastPages,
   setEngine,
   setOllamaModel,
   setOllamaURL,
@@ -27,6 +30,7 @@ interface ReaderParagraph {
   refPath: string;
   sourceText: string;
   translation?: string;
+  pageIndex?: number;
 }
 
 interface RunState {
@@ -45,7 +49,7 @@ function hash(text: string): string {
 }
 
 function cacheKey(itemKey: string, sourceText: string, engineTag: string): string {
-  return `${BASE}.cache.v2.${hash(engineTag)}.${itemKey}.${hash(sourceText)}.${TARGET_LANG}`;
+  return `${BASE}.cache.v3.${hash(engineTag)}.${itemKey}.${hash(sourceText)}.${TARGET_LANG}`;
 }
 
 function isFailureText(text: string): boolean {
@@ -100,8 +104,8 @@ async function translateWithPDFTranslate(text: string, itemID: number): Promise<
   }
 
   const task = await pdfTranslate.api.translate(text, options);
-
   const result = String(task?.result || "").trim();
+
   if (task?.status && task.status !== "success") {
     throw new Error(result || "Translate for Zotero 翻译任务失败。");
   }
@@ -154,7 +158,7 @@ async function translateWithOllama(text: string): Promise<string> {
     try {
       response = JSON.parse(response);
     } catch (_) {
-      // Leave response as-is and fail with the common message below.
+      // Common validation below handles malformed responses.
     }
   }
 
@@ -176,6 +180,78 @@ async function translateText(
   return translateWithPDFTranslate(text, itemID);
 }
 
+function hardSplitText(text: string, maxChars: number): string[] {
+  const result: string[] = [];
+  let rest = text.trim();
+  while (rest.length > maxChars) {
+    const window = rest.slice(0, maxChars + 1);
+    let splitAt = Math.max(
+      window.lastIndexOf(" "),
+      window.lastIndexOf(", "),
+      window.lastIndexOf("; "),
+    );
+    if (splitAt < Math.floor(maxChars * 0.55)) splitAt = maxChars;
+    const chunk = rest.slice(0, splitAt).trim();
+    if (chunk) result.push(chunk);
+    rest = rest.slice(splitAt).trim();
+  }
+  if (rest) result.push(rest);
+  return result;
+}
+
+function splitTextForRequest(text: string, maxChars: number): string[] {
+  const source = text.trim();
+  if (source.length <= maxChars) return [source];
+
+  const sentences = source.match(/[^.!?。！？；;]+(?:[.!?。！？；;]+|$)/gu) || [source];
+  const chunks: string[] = [];
+  let current = "";
+
+  const flush = () => {
+    const value = current.trim();
+    if (value) chunks.push(value);
+    current = "";
+  };
+
+  for (const sentenceRaw of sentences) {
+    const sentence = sentenceRaw.trim();
+    if (!sentence) continue;
+
+    if (sentence.length > maxChars) {
+      flush();
+      chunks.push(...hardSplitText(sentence, maxChars));
+      continue;
+    }
+
+    const candidate = current ? `${current} ${sentence}` : sentence;
+    if (candidate.length > maxChars) {
+      flush();
+      current = sentence;
+    } else {
+      current = candidate;
+    }
+  }
+  flush();
+  return chunks.length ? chunks : hardSplitText(source, maxChars);
+}
+
+async function translateTextLimited(
+  text: string,
+  itemID: number,
+  engine: TranslationEngine,
+): Promise<string> {
+  const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
+  if (chunks.length === 1) {
+    return translateText(chunks[0], itemID, engine);
+  }
+
+  const translated: string[] = [];
+  for (const chunk of chunks) {
+    translated.push(await translateText(chunk, itemID, engine));
+  }
+  return translated.join(" ").trim();
+}
+
 function getInternalReader(reader: any): any {
   return reader?._internalReader || reader;
 }
@@ -192,6 +268,15 @@ function getSDTDocument(reader: any): Document | null {
   try {
     const view = getActiveSDTView(reader);
     return view?._iframeDocument || view?._iframe?.contentDocument || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getSDTStructure(reader: any): any | null {
+  try {
+    const view = getActiveSDTView(reader);
+    return view?.getData?.()?.structure || view?._structure || null;
   } catch (_) {
     return null;
   }
@@ -306,10 +391,51 @@ function isTranslatableElement(element: HTMLElement): boolean {
   return true;
 }
 
+function parseRefPath(refPath: string): number[] {
+  return refPath
+    .split(".")
+    .map((part) => Number(part))
+    .filter((part) => Number.isFinite(part));
+}
+
+function compareRefPath(a: number[], b: number[]): number {
+  const length = Math.min(a.length, b.length);
+  for (let i = 0; i < length; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
+function getPageIndexForRef(structure: any, refPath: string): number | undefined {
+  const ref = parseRefPath(refPath);
+  if (!ref.length) return undefined;
+  const pages = structure?.catalog?.pages;
+  if (!Array.isArray(pages)) return undefined;
+
+  for (let i = 0; i < pages.length; i++) {
+    const range = pages[i]?.contentRange;
+    if (!Array.isArray(range) || range.length !== 2) continue;
+    const start = Array.isArray(range[0]) ? range[0] : [];
+    const end = Array.isArray(range[1]) ? range[1] : [];
+    if (start.length && end.length && compareRefPath(ref, start) >= 0 && compareRefPath(ref, end) < 0) {
+      return i;
+    }
+  }
+  return undefined;
+}
+
+function shouldSkipByPage(pageIndex: number | undefined, totalPages: number): boolean {
+  const skipLastPages = getSkipLastPages();
+  if (!skipLastPages || pageIndex === undefined || totalPages <= 0) return false;
+  const firstSkippedPage = Math.max(0, totalPages - skipLastPages);
+  return pageIndex >= firstSkippedPage;
+}
+
 function collectParagraphs(
   doc: Document,
   itemKey: string,
   engineTag: string,
+  structure: any,
 ): ReaderParagraph[] {
   const selector = [
     "#sdt-content p[data-ref-path]",
@@ -324,6 +450,7 @@ function collectParagraphs(
     "#sdt-content li[data-ref-path]",
   ].join(",");
 
+  const totalPages = Array.isArray(structure?.catalog?.pages) ? structure.catalog.pages.length : 0;
   const elements = Array.from(doc.querySelectorAll(selector)) as HTMLElement[];
   const paragraphs: ReaderParagraph[] = [];
 
@@ -333,9 +460,14 @@ function collectParagraphs(
     const sourceText = (element.textContent || "").replace(/\s+/g, " ").trim();
     if (sourceText.length < 2) continue;
 
+    const refPath = element.dataset.refPath || "";
+    const pageIndex = getPageIndexForRef(structure, refPath);
+    if (shouldSkipByPage(pageIndex, totalPages)) continue;
+
     paragraphs.push({
-      refPath: element.dataset.refPath || "",
+      refPath,
       sourceText,
+      pageIndex,
       translation: loadCached(itemKey, sourceText, engineTag),
     });
   }
@@ -372,13 +504,16 @@ function ensureTranslationBlock(doc: Document, paragraph: ReaderParagraph): HTML
   block.className = TRANSLATION_CLASS;
   block.lang = TARGET_LANG;
   block.dataset.sourceRefPath = paragraph.refPath;
+  if (paragraph.pageIndex !== undefined) {
+    block.dataset.sourcePage = String(paragraph.pageIndex + 1);
+  }
 
   if (paragraph.translation) {
     block.dataset.state = "done";
     block.textContent = paragraph.translation;
   } else {
     block.dataset.state = "loading";
-    block.textContent = "正在翻译…";
+    block.textContent = "等待翻译…";
   }
 
   source.after(block);
@@ -414,14 +549,13 @@ function showError(reader: any, message: string): void {
   }
 }
 
-function markRemainingPaused(doc: Document, paragraphs: ReaderParagraph[], startIndex: number): void {
-  for (let i = startIndex; i < paragraphs.length; i++) {
-    const paragraph = paragraphs[i];
+function markUnfinishedPaused(doc: Document, paragraphs: ReaderParagraph[]): void {
+  for (const paragraph of paragraphs) {
     if (paragraph.translation) continue;
     const block = ensureTranslationBlock(doc, paragraph);
-    if (!block) continue;
+    if (!block || block.dataset.state === "error") continue;
     block.dataset.state = "paused";
-    block.textContent = "已暂停：连续翻译失败。请切换翻译引擎或检查服务后，点击 🔄 重试。";
+    block.textContent = "已暂停：连续翻译失败。请检查翻译服务后点击 🔄 重试。";
   }
 }
 
@@ -435,58 +569,88 @@ async function translateParagraphs(
   engine: TranslationEngine,
   engineTag: string,
 ): Promise<void> {
-  let consecutiveErrors = 0;
   const maxErrors = getMaxConsecutiveErrors();
   const requestGapMs = getRequestGapMs();
+  const configuredConcurrent = getMaxConcurrent();
+  const concurrency = engine === "ollama" ? 1 : configuredConcurrent;
+  const pendingIndexes = paragraphs
+    .map((paragraph, index) => (paragraph.translation ? -1 : index))
+    .filter((index) => index >= 0);
 
-  for (let i = 0; i < paragraphs.length; i++) {
-    const paragraph = paragraphs[i];
-    if (!isCurrentRun(reader, generation, doc)) return;
-    if (paragraph.translation) continue;
-
-    const block = ensureTranslationBlock(doc, paragraph);
-    if (!block) return;
-    block.dataset.state = "loading";
-    block.textContent = `正在翻译…（${engine === "ollama" ? "Ollama" : "Translate for Zotero"}）`;
-
-    try {
-      const translation = await translateText(paragraph.sourceText, itemID, engine);
-      if (!isCurrentRun(reader, generation, doc)) return;
-
-      paragraph.translation = translation;
-      saveCached(itemKey, paragraph.sourceText, translation, engineTag);
-      consecutiveErrors = 0;
-
-      const liveBlock = findTranslationBlock(doc, paragraph.refPath);
-      if (liveBlock) {
-        liveBlock.dataset.state = "done";
-        liveBlock.textContent = translation;
-      }
-    } catch (error: any) {
-      if (isDeadObjectError(error)) {
-        cancelRun(reader);
-        return;
-      }
-      if (!isCurrentRun(reader, generation, doc)) return;
-
-      consecutiveErrors += 1;
-      const liveBlock = findTranslationBlock(doc, paragraph.refPath);
-      if (liveBlock) {
-        liveBlock.dataset.state = "error";
-        liveBlock.textContent = `翻译失败：${error?.message || String(error)}`;
-      }
-
-      if (consecutiveErrors >= maxErrors) {
-        markRemainingPaused(doc, paragraphs, i + 1);
-        cancelRun(reader);
-        return;
-      }
-    }
-
-    if (i < paragraphs.length - 1 && isCurrentRun(reader, generation, doc) && requestGapMs > 0) {
-      await Zotero.Promise.delay(requestGapMs);
-    }
+  if (!pendingIndexes.length) {
+    const state = runStates.get(reader);
+    if (state && state.generation === generation) state.running = false;
+    return;
   }
+
+  let cursor = 0;
+  let failureStreak = 0;
+  let aborted = false;
+  let nextStartAt = Date.now();
+
+  const waitForStartSlot = async () => {
+    if (requestGapMs <= 0) return;
+    const now = Date.now();
+    const scheduled = Math.max(now, nextStartAt);
+    nextStartAt = scheduled + requestGapMs;
+    const wait = scheduled - now;
+    if (wait > 0) await Zotero.Promise.delay(wait);
+  };
+
+  const worker = async () => {
+    while (!aborted && isCurrentRun(reader, generation, doc)) {
+      const slot = cursor++;
+      if (slot >= pendingIndexes.length) return;
+      const paragraphIndex = pendingIndexes[slot];
+      const paragraph = paragraphs[paragraphIndex];
+      const block = ensureTranslationBlock(doc, paragraph);
+      if (!block) continue;
+
+      block.dataset.state = "loading";
+      block.textContent = `正在翻译…（${slot + 1}/${pendingIndexes.length}）`;
+
+      await waitForStartSlot();
+      if (aborted || !isCurrentRun(reader, generation, doc)) return;
+
+      try {
+        const translation = await translateTextLimited(paragraph.sourceText, itemID, engine);
+        if (!isCurrentRun(reader, generation, doc)) return;
+
+        paragraph.translation = translation;
+        saveCached(itemKey, paragraph.sourceText, translation, engineTag);
+        failureStreak = 0;
+
+        const liveBlock = findTranslationBlock(doc, paragraph.refPath);
+        if (liveBlock) {
+          liveBlock.dataset.state = "done";
+          liveBlock.textContent = translation;
+        }
+      } catch (error: any) {
+        if (isDeadObjectError(error)) {
+          aborted = true;
+          cancelRun(reader);
+          return;
+        }
+        if (!isCurrentRun(reader, generation, doc)) return;
+
+        failureStreak += 1;
+        const liveBlock = findTranslationBlock(doc, paragraph.refPath);
+        if (liveBlock) {
+          liveBlock.dataset.state = "error";
+          liveBlock.textContent = `翻译失败：${error?.message || String(error)}`;
+        }
+
+        if (failureStreak >= maxErrors) {
+          aborted = true;
+          cancelRun(reader);
+          markUnfinishedPaused(doc, paragraphs);
+          return;
+        }
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, pendingIndexes.length) }, () => worker()));
 
   const state = runStates.get(reader);
   if (state && state.generation === generation) state.running = false;
@@ -500,9 +664,6 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
   installStyles(doc);
   cancelRun(reader);
 
-  // Refresh deliberately removes every rendered translation block. Successful
-  // translations for the current backend are immediately restored from the v2
-  // cache; failed results and stale results from another backend are not.
   if (refresh) {
     clearTranslations(doc);
   }
@@ -520,9 +681,10 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
 
   const engine = getEngine();
   const engineTag = getCacheEngineTag();
-  const paragraphs = collectParagraphs(doc, itemKey, engineTag);
+  const structure = getSDTStructure(reader);
+  const paragraphs = collectParagraphs(doc, itemKey, engineTag, structure);
   if (!paragraphs.length) {
-    throw new Error("当前阅读模式中没有检测到可翻译的正文段落。");
+    throw new Error("当前阅读模式中没有检测到可翻译的正文段落，或已被末尾页数设置全部排除。");
   }
 
   for (const paragraph of paragraphs) {
@@ -569,7 +731,10 @@ export async function toggleBilingualReading(reader: any): Promise<void> {
 export async function refreshBilingualReading(reader: any): Promise<void> {
   try {
     cancelRun(reader);
-    await prepareAndRun(reader, true);
+    const doc = await ensureReadingMode(reader);
+    clearTranslations(doc);
+    await Zotero.Promise.delay(30);
+    await prepareAndRun(reader, false);
   } catch (error: any) {
     if (!isDeadObjectError(error)) {
       showError(reader, error?.message || String(error));
@@ -594,7 +759,7 @@ export function configureTranslation(reader: any): void {
 
   const currentEngine = getEngine();
   const answer = win.prompt(
-    "快速切换翻译后端：\n1 = Translate for Zotero\n2 = Ollama\n\n完整设置及 Translate for Zotero 服务选择请前往 Zotero 设置 → 中英对照。",
+    "快速切换翻译后端：\n1 = Translate for Zotero（推荐）\n2 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
     currentEngine === "ollama" ? "2" : "1",
   );
   if (answer === null) return;
@@ -612,7 +777,7 @@ export function configureTranslation(reader: any): void {
     setEngine("ollama");
     setOllamaURL(String(url));
     setOllamaModel(String(model));
-    win.alert?.("已切换为 Ollama。点击 🔄 会移除旧错误结果并使用新后端重新翻译。");
+    win.alert?.("已切换为 Ollama。点击 🔄 会清除旧结果并重新翻译。");
     return;
   }
 
@@ -666,7 +831,7 @@ function renderToolbar(event: any): void {
       doc,
       REFRESH_BUTTON_CLASS,
       "🔄",
-      "移除错误/旧后端结果，保留当前后端成功缓存，并重新翻译未成功段落",
+      "取消当前任务、清除错误结果，并按当前设置重新翻译",
       () => void refreshBilingualReading(reader),
     ),
   );

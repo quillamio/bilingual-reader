@@ -4,15 +4,21 @@ export type TranslationEngine = "pdftranslate" | "ollama";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
-export const DEFAULT_REQUEST_GAP_MS = 650;
+export const DEFAULT_REQUEST_GAP_MS = 250;
+export const DEFAULT_MAX_CONCURRENT = 2;
+export const DEFAULT_MAX_CHARS_PER_REQUEST = 2800;
 export const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
+export const DEFAULT_SKIP_LAST_PAGES = 1;
 
 const ENGINE_PREF = `${BASE}.engine`;
 const PDFTRANSLATE_SERVICE_PREF = `${BASE}.pdftranslate.service`;
 const OLLAMA_URL_PREF = `${BASE}.ollama.url`;
 const OLLAMA_MODEL_PREF = `${BASE}.ollama.model`;
 const REQUEST_GAP_PREF = `${BASE}.requestGapMs`;
+const MAX_CONCURRENT_PREF = `${BASE}.maxConcurrent`;
+const MAX_CHARS_PREF = `${BASE}.maxCharsPerRequest`;
 const MAX_ERRORS_PREF = `${BASE}.maxConsecutiveErrors`;
+const SKIP_LAST_PAGES_PREF = `${BASE}.skipLastPages`;
 
 function getStringPref(key: string, fallback: string): string {
   const value = (Zotero.Prefs as any).get(key);
@@ -69,11 +75,27 @@ export function setOllamaModel(model: string): void {
 }
 
 export function getRequestGapMs(): number {
-  return getNumberPref(REQUEST_GAP_PREF, DEFAULT_REQUEST_GAP_MS, 0, 10000);
+  return getNumberPref(REQUEST_GAP_PREF, DEFAULT_REQUEST_GAP_MS, 0, 5000);
 }
 
 export function setRequestGapMs(value: number): void {
-  setNumberPref(REQUEST_GAP_PREF, value, 0, 10000);
+  setNumberPref(REQUEST_GAP_PREF, value, 0, 5000);
+}
+
+export function getMaxConcurrent(): number {
+  return getNumberPref(MAX_CONCURRENT_PREF, DEFAULT_MAX_CONCURRENT, 1, 3);
+}
+
+export function setMaxConcurrent(value: number): void {
+  setNumberPref(MAX_CONCURRENT_PREF, value, 1, 3);
+}
+
+export function getMaxCharsPerRequest(): number {
+  return getNumberPref(MAX_CHARS_PREF, DEFAULT_MAX_CHARS_PER_REQUEST, 500, 8000);
+}
+
+export function setMaxCharsPerRequest(value: number): void {
+  setNumberPref(MAX_CHARS_PREF, value, 500, 8000);
 }
 
 export function getMaxConsecutiveErrors(): number {
@@ -82,6 +104,14 @@ export function getMaxConsecutiveErrors(): number {
 
 export function setMaxConsecutiveErrors(value: number): void {
   setNumberPref(MAX_ERRORS_PREF, value, 1, 20);
+}
+
+export function getSkipLastPages(): number {
+  return getNumberPref(SKIP_LAST_PAGES_PREF, DEFAULT_SKIP_LAST_PAGES, 0, 50);
+}
+
+export function setSkipLastPages(value: number): void {
+  setNumberPref(SKIP_LAST_PAGES_PREF, value, 0, 50);
 }
 
 export function getCacheEngineTag(): string {
