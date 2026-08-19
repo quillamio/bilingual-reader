@@ -8,6 +8,7 @@ export const DEFAULT_REQUEST_GAP_MS = 650;
 export const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 
 const ENGINE_PREF = `${BASE}.engine`;
+const PDFTRANSLATE_SERVICE_PREF = `${BASE}.pdftranslate.service`;
 const OLLAMA_URL_PREF = `${BASE}.ollama.url`;
 const OLLAMA_MODEL_PREF = `${BASE}.ollama.model`;
 const REQUEST_GAP_PREF = `${BASE}.requestGapMs`;
@@ -40,6 +41,15 @@ export function getEngine(): TranslationEngine {
 
 export function setEngine(engine: TranslationEngine): void {
   setStringPref(ENGINE_PREF, engine);
+}
+
+export function getPDFTranslateService(): string {
+  const value = (Zotero.Prefs as any).get(PDFTRANSLATE_SERVICE_PREF);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function setPDFTranslateService(service: string): void {
+  setStringPref(PDFTRANSLATE_SERVICE_PREF, service.trim());
 }
 
 export function getOllamaURL(): string {
@@ -78,5 +88,5 @@ export function getCacheEngineTag(): string {
   if (getEngine() === "ollama") {
     return `ollama:${getOllamaURL()}:${getOllamaModel()}`;
   }
-  return "pdftranslate";
+  return `pdftranslate:${getPDFTranslateService() || "default"}`;
 }
