@@ -15,7 +15,7 @@
 
     <hbox align="center" style="margin-bottom: 10px;">
       <html:label for="bilingualreader-engine" style="min-width: 110px;">翻译后端</html:label>
-      <html:select id="bilingualreader-engine" style="min-width: 260px; padding: 4px 8px;">
+      <html:select id="bilingualreader-engine" style="min-width: 300px; padding: 4px 8px;">
         <html:option value="pdftranslate">Translate for Zotero</html:option>
         <html:option value="ollama">Ollama</html:option>
       </html:select>
@@ -24,9 +24,20 @@
 
   <groupbox id="bilingualreader-pdftranslate-section">
     <label><html:h3>Translate for Zotero</html:h3></label>
-    <html:p id="bilingualreader-pdftranslate-status" style="line-height: 1.6; margin: 0 0 8px 0;"></html:p>
+    <html:p id="bilingualreader-pdftranslate-status" style="line-height: 1.6; margin: 0 0 10px 0;"></html:p>
+
+    <hbox align="center" style="margin-bottom: 8px;">
+      <html:label for="bilingualreader-pdftranslate-service" style="min-width: 110px;">翻译服务</html:label>
+      <html:select
+        id="bilingualreader-pdftranslate-service"
+        style="min-width: 360px; max-width: 520px; padding: 4px 8px;"
+      >
+        <html:option value="">跟随 Translate for Zotero 当前默认服务</html:option>
+      </html:select>
+    </hbox>
+
     <html:p style="line-height: 1.6; margin: 0;">
-      Bilingual Reader 使用 Translate for Zotero 当前默认的翻译服务。具体服务（例如 Google、DeepL、大语言模型等）仍在 Translate for Zotero 自己的设置页中选择。
+      如果直接指定某个服务，Bilingual Reader 会把该服务编号传给 Translate for Zotero；如果选择“跟随默认服务”，则继续使用 Translate for Zotero 自己设置的当前默认服务。服务本身的密钥、额度和其他参数仍由 Translate for Zotero 管理。
     </html:p>
   </groupbox>
 
@@ -87,7 +98,7 @@
   <groupbox>
     <label><html:h3>刷新说明</html:h3></label>
     <html:p style="line-height: 1.6; margin: 0;">
-      修改翻译后端或修复翻译服务后，回到 PDF 阅读器点击 🔄。新版会立即移除旧错误结果；当前后端已经成功缓存的段落会直接恢复，其余段落重新翻译。如果从 Translate for Zotero 切换到 Ollama（或更换 Ollama 模型），会使用新的缓存命名空间，避免继续显示旧后端结果。
+      修改翻译后端或翻译服务后，回到 PDF 阅读器点击 🔄。新版会先移除当前页面中的旧译文块，再恢复当前后端已经成功缓存的结果，并重新翻译其余段落。失败提示不会继续作为“成功译文”保留；切换 Translate for Zotero 的指定服务、切换到 Ollama 或更换 Ollama 模型时，也会使用不同的缓存命名空间。
     </html:p>
   </groupbox>
 </vbox>
