@@ -1,3 +1,5 @@
-pref("baseURL", "https://api.openai.com/v1");
-pref("apiKey", "");
-pref("model", "gpt-4o-mini");
+pref("engine", "pdftranslate");
+pref("ollama.url", "http://127.0.0.1:11434");
+pref("ollama.model", "gpt-oss:20b");
+pref("requestGapMs", 650);
+pref("maxConsecutiveErrors", 3);
