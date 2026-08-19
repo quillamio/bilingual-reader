@@ -142,7 +142,8 @@ function populatePDFTranslateServices(doc: Document): void {
   }
 
   const configured = getPDFTranslateService();
-  const hasConfigured = Array.from(select.options).some((option) => option.value === configured);
+  const serviceOptions = Array.from(select.querySelectorAll("option")) as HTMLOptionElement[];
+  const hasConfigured = serviceOptions.some((option) => option.value === configured);
   select.value = hasConfigured ? configured : "";
 
   target.textContent = version
