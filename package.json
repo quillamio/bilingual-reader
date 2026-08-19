@@ -1,7 +1,7 @@
 {
   "name": "zotero-bilingual-reader",
   "type": "module",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Zotero 10 PDF reading mode bilingual paragraph translator",
   "config": {
     "addonName": "Bilingual Reader",
@@ -20,8 +20,8 @@
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "zotero-plugin build && tsc --noEmit",
-    "lint:check": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts",
-    "lint:fix": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts --fix",
+    "lint:check": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts src/settings.ts src/modules/preferenceScript.ts",
+    "lint:fix": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts src/settings.ts src/modules/preferenceScript.ts --fix",
     "test": "zotero-plugin test"
   },
   "dependencies": {
