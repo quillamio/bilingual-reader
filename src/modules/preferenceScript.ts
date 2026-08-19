@@ -1,20 +1,29 @@
 import {
+  DEFAULT_MAX_CHARS_PER_REQUEST,
+  DEFAULT_MAX_CONCURRENT,
   DEFAULT_MAX_CONSECUTIVE_ERRORS,
   DEFAULT_OLLAMA_MODEL,
   DEFAULT_OLLAMA_URL,
   DEFAULT_REQUEST_GAP_MS,
+  DEFAULT_SKIP_LAST_PAGES,
   getEngine,
+  getMaxCharsPerRequest,
+  getMaxConcurrent,
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
   getPDFTranslateService,
   getRequestGapMs,
+  getSkipLastPages,
   setEngine,
+  setMaxCharsPerRequest,
+  setMaxConcurrent,
   setMaxConsecutiveErrors,
   setOllamaModel,
   setOllamaURL,
   setPDFTranslateService,
   setRequestGapMs,
+  setSkipLastPages,
   type TranslationEngine,
 } from "../settings";
 
@@ -51,20 +60,28 @@ function saveSettings(doc: Document): void {
   const model =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
-  const gap = readNumberInput(doc, "bilingualreader-request-gap", DEFAULT_REQUEST_GAP_MS);
-  const maxErrors = readNumberInput(
-    doc,
-    "bilingualreader-max-errors",
-    DEFAULT_MAX_CONSECUTIVE_ERRORS,
-  );
 
   setEngine(engine);
   setPDFTranslateService(service);
   setOllamaURL(url);
   setOllamaModel(model);
-  setRequestGapMs(gap);
-  setMaxConsecutiveErrors(maxErrors);
-  setStatus(doc, "设置已保存。正在翻译的论文请点击阅读器顶部 🔄 以应用新后端或新服务。");
+  setSkipLastPages(
+    readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
+  );
+  setMaxConcurrent(
+    readNumberInput(doc, "bilingualreader-max-concurrent", DEFAULT_MAX_CONCURRENT),
+  );
+  setRequestGapMs(
+    readNumberInput(doc, "bilingualreader-request-gap", DEFAULT_REQUEST_GAP_MS),
+  );
+  setMaxCharsPerRequest(
+    readNumberInput(doc, "bilingualreader-max-chars", DEFAULT_MAX_CHARS_PER_REQUEST),
+  );
+  setMaxConsecutiveErrors(
+    readNumberInput(doc, "bilingualreader-max-errors", DEFAULT_MAX_CONSECUTIVE_ERRORS),
+  );
+
+  setStatus(doc, "设置已保存。返回正在阅读的 PDF 后点击 🔄 即可应用。 ");
 }
 
 async function testOllama(doc: Document): Promise<void> {
@@ -95,7 +112,7 @@ async function testOllama(doc: Document): Promise<void> {
         doc,
         hasModel
           ? `Ollama 连接成功，并检测到模型 ${model}。`
-          : `Ollama 连接成功，但当前模型列表中未发现 ${model}。已检测：${models.slice(0, 8).join(", ")}`,
+          : `Ollama 连接成功，但模型列表中未发现 ${model}。已检测：${models.slice(0, 8).join(", ")}`,
       );
     } else {
       setStatus(doc, "Ollama 连接成功。未读取到本地模型列表；云模型仍可能可以直接调用。");
@@ -147,8 +164,8 @@ function populatePDFTranslateServices(doc: Document): void {
   select.value = hasConfigured ? configured : "";
 
   target.textContent = version
-    ? `已检测到 Translate for Zotero ${version}。可在下方直接指定服务；选择“跟随默认服务”时仍由 Translate for Zotero 自己的设置决定。`
-    : "已检测到 Translate for Zotero。可在下方直接指定服务；选择“跟随默认服务”时仍由 Translate for Zotero 自己的设置决定。";
+    ? `已检测到 Translate for Zotero ${version}。默认推荐使用该后端。`
+    : "已检测到 Translate for Zotero。默认推荐使用该后端。";
 }
 
 export async function registerPrefsScripts(window: Window): Promise<void> {
@@ -160,13 +177,19 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine");
   const url = getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url");
   const model = getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model");
+  const skipLastPages = getElement<HTMLInputElement>(doc, "bilingualreader-skip-last-pages");
+  const maxConcurrent = getElement<HTMLInputElement>(doc, "bilingualreader-max-concurrent");
   const gap = getElement<HTMLInputElement>(doc, "bilingualreader-request-gap");
+  const maxChars = getElement<HTMLInputElement>(doc, "bilingualreader-max-chars");
   const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
 
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
   if (model) model.value = getOllamaModel();
+  if (skipLastPages) skipLastPages.value = String(getSkipLastPages());
+  if (maxConcurrent) maxConcurrent.value = String(getMaxConcurrent());
   if (gap) gap.value = String(getRequestGapMs());
+  if (maxChars) maxChars.value = String(getMaxCharsPerRequest());
   if (maxErrors) maxErrors.value = String(getMaxConsecutiveErrors());
 
   updateBackendVisibility(doc);
