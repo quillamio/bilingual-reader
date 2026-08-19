@@ -7,11 +7,13 @@ import {
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
+  getPDFTranslateService,
   getRequestGapMs,
   setEngine,
   setMaxConsecutiveErrors,
   setOllamaModel,
   setOllamaURL,
+  setPDFTranslateService,
   setRequestGapMs,
   type TranslationEngine,
 } from "../settings";
@@ -42,16 +44,14 @@ function readNumberInput(doc: Document, id: string, fallback: number): number {
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
+  const service =
+    getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service")?.value || "";
   const url =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url")?.value || DEFAULT_OLLAMA_URL;
   const model =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
-  const gap = readNumberInput(
-    doc,
-    "bilingualreader-request-gap",
-    DEFAULT_REQUEST_GAP_MS,
-  );
+  const gap = readNumberInput(doc, "bilingualreader-request-gap", DEFAULT_REQUEST_GAP_MS);
   const maxErrors = readNumberInput(
     doc,
     "bilingualreader-max-errors",
@@ -59,11 +59,12 @@ function saveSettings(doc: Document): void {
   );
 
   setEngine(engine);
+  setPDFTranslateService(service);
   setOllamaURL(url);
   setOllamaModel(model);
   setRequestGapMs(gap);
   setMaxConsecutiveErrors(maxErrors);
-  setStatus(doc, "设置已保存。正在翻译的论文请点击阅读器顶部 🔄 以应用新后端。 ");
+  setStatus(doc, "设置已保存。正在翻译的论文请点击阅读器顶部 🔄 以应用新后端或新服务。");
 }
 
 async function testOllama(doc: Document): Promise<void> {
@@ -104,25 +105,49 @@ async function testOllama(doc: Document): Promise<void> {
   }
 }
 
-function showTranslateForZoteroStatus(doc: Document): void {
+function populatePDFTranslateServices(doc: Document): void {
   const api = (Zotero as any).PDFTranslate?.api;
   const target = getElement<HTMLElement>(doc, "bilingualreader-pdftranslate-status");
-  if (!target) return;
+  const select = getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service");
+  if (!target || !select) return;
+
+  select.textContent = "";
+  const defaultOption = doc.createElementNS("http://www.w3.org/1999/xhtml", "option");
+  defaultOption.setAttribute("value", "");
+  defaultOption.textContent = "跟随 Translate for Zotero 当前默认服务";
+  select.append(defaultOption);
 
   if (!api?.translate) {
     target.textContent = "未检测到 Translate for Zotero。请先安装并启用该插件。";
+    select.value = "";
     return;
   }
 
   let version = "";
+  let services: any[] = [];
   try {
     version = api.getVersion?.() || "";
+    services = api.getServices?.() || [];
   } catch (_) {
-    version = "";
+    services = [];
   }
+
+  for (const service of services) {
+    const id = String(service?.id || "").trim();
+    if (!id) continue;
+    const option = doc.createElementNS("http://www.w3.org/1999/xhtml", "option");
+    option.setAttribute("value", id);
+    option.textContent = String(service?.name || id);
+    select.append(option);
+  }
+
+  const configured = getPDFTranslateService();
+  const hasConfigured = Array.from(select.options).some((option) => option.value === configured);
+  select.value = hasConfigured ? configured : "";
+
   target.textContent = version
-    ? `已检测到 Translate for Zotero ${version}。具体翻译服务继续在 Translate for Zotero 自己的设置中选择。`
-    : "已检测到 Translate for Zotero。具体翻译服务继续在 Translate for Zotero 自己的设置中选择。";
+    ? `已检测到 Translate for Zotero ${version}。可在下方直接指定服务；选择“跟随默认服务”时仍由 Translate for Zotero 自己的设置决定。`
+    : "已检测到 Translate for Zotero。可在下方直接指定服务；选择“跟随默认服务”时仍由 Translate for Zotero 自己的设置决定。";
 }
 
 export async function registerPrefsScripts(window: Window): Promise<void> {
@@ -144,12 +169,19 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (maxErrors) maxErrors.value = String(getMaxConsecutiveErrors());
 
   updateBackendVisibility(doc);
-  showTranslateForZoteroStatus(doc);
+  populatePDFTranslateServices(doc);
 
   engine?.addEventListener("change", () => {
     updateBackendVisibility(doc);
-    setStatus(doc, "翻译后端已修改，点击“保存设置”后生效。 ");
+    setStatus(doc, "翻译后端已修改，点击“保存设置”后生效。");
   });
+
+  getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service")?.addEventListener(
+    "change",
+    () => {
+      setStatus(doc, "Translate for Zotero 服务已修改，保存后回到 PDF 点击 🔄 应用。 ");
+    },
+  );
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
     saveSettings(doc);
