@@ -6,6 +6,7 @@ import {
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
+  getPDFTranslateService,
   getRequestGapMs,
   setEngine,
   setOllamaModel,
@@ -88,11 +89,17 @@ async function translateWithPDFTranslate(text: string, itemID: number): Promise<
     );
   }
 
-  const task = await pdfTranslate.api.translate(text, {
+  const options: Record<string, any> = {
     pluginID: PLUGIN_ID,
     itemID,
     langto: TARGET_LANG,
-  });
+  };
+  const selectedService = getPDFTranslateService();
+  if (selectedService) {
+    options.service = selectedService;
+  }
+
+  const task = await pdfTranslate.api.translate(text, options);
 
   const result = String(task?.result || "").trim();
   if (task?.status && task.status !== "success") {
@@ -587,7 +594,7 @@ export function configureTranslation(reader: any): void {
 
   const currentEngine = getEngine();
   const answer = win.prompt(
-    "快速切换翻译后端：\n1 = Translate for Zotero（使用其当前默认服务）\n2 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
+    "快速切换翻译后端：\n1 = Translate for Zotero\n2 = Ollama\n\n完整设置及 Translate for Zotero 服务选择请前往 Zotero 设置 → 中英对照。",
     currentEngine === "ollama" ? "2" : "1",
   );
   if (answer === null) return;
@@ -611,7 +618,7 @@ export function configureTranslation(reader: any): void {
 
   setEngine("pdftranslate");
   win.alert?.(
-    "已切换为 Translate for Zotero。请在 Translate for Zotero 中选好服务，再点击 🔄 重试。",
+    "已切换为 Translate for Zotero。可在 Zotero 设置 → 中英对照 中指定具体服务，然后点击 🔄 重试。",
   );
 }
 
