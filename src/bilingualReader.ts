@@ -3,6 +3,7 @@ import {
   DEFAULT_OLLAMA_URL,
   getCacheEngineTag,
   getEngine,
+  getMaxBatchParagraphs,
   getMaxCharsPerRequest,
   getMaxConcurrent,
   getMaxConsecutiveErrors,
@@ -10,25 +11,41 @@ import {
   getOllamaURL,
   getPDFTranslateService,
   getRequestGapMs,
+  getRequestTimeoutMs,
   getSkipLastPages,
   setEngine,
   setOllamaModel,
   setOllamaURL,
   type TranslationEngine,
 } from "./settings";
+import {
+  flushTranslationCacheIndex,
+  loadCachedTranslation,
+  saveCachedTranslation,
+} from "./translationCache";
+import {
+  buildBatchPayload,
+  packBatchItems,
+  parseBatchResult,
+  splitTextForRequest,
+  type BatchInput,
+} from "./translationPipeline";
+import { CancellationToken } from "./cancellationToken";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
-const BASE = "extensions.zotero.bilingualreader";
 const TARGET_LANG = "zh-CN";
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const TOOLBAR_BUTTON_CLASS = "bilingual-reader-toolbar-button";
 const REFRESH_BUTTON_CLASS = "bilingual-reader-refresh-button";
 const SETTINGS_BUTTON_CLASS = "bilingual-reader-settings-button";
 const STYLE_ID = "bilingual-reader-style";
+const PREFERENCES_PANE_ID = "bilingual-reader-preferences";
 
 interface ReaderParagraph {
   refPath: string;
   sourceText: string;
+  sourceElement: HTMLElement;
+  block?: HTMLDivElement;
   translation?: string;
   pageIndex?: number;
 }
@@ -36,20 +53,18 @@ interface ReaderParagraph {
 interface RunState {
   generation: number;
   running: boolean;
+  cancellation?: CancellationToken;
 }
 
 const runStates = new WeakMap<object, RunState>();
 
-function hash(text: string): string {
-  let result = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    result = Math.imul(result ^ text.charCodeAt(i), 16777619);
-  }
-  return (result >>> 0).toString(16);
+interface TranslationResponse {
+  text: string;
+  engineTag: string;
 }
 
-function cacheKey(itemKey: string, sourceText: string, engineTag: string): string {
-  return `${BASE}.cache.v3.${hash(engineTag)}.${itemKey}.${hash(sourceText)}.${TARGET_LANG}`;
+interface TranslationJobItem extends BatchInput {
+  paragraphIndex: number;
 }
 
 function isFailureText(text: string): boolean {
@@ -64,28 +79,79 @@ function isFailureText(text: string): boolean {
   );
 }
 
-function loadCached(itemKey: string, sourceText: string, engineTag: string): string | undefined {
-  const key = cacheKey(itemKey, sourceText, engineTag);
-  const value = (Zotero.Prefs as any).get(key);
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  if (isFailureText(value)) {
-    (Zotero.Prefs as any).set(key, "");
-    return undefined;
+class RunCancelledError extends Error {
+  constructor() {
+    super("翻译任务已取消。");
+    this.name = "RunCancelledError";
   }
-  return value;
 }
 
-function saveCached(
-  itemKey: string,
-  sourceText: string,
-  translation: string,
-  engineTag: string,
-): void {
-  if (isFailureText(translation)) return;
-  (Zotero.Prefs as any).set(cacheKey(itemKey, sourceText, engineTag), translation);
+function isCancellationError(error: unknown): boolean {
+  return error instanceof RunCancelledError || /翻译任务已取消/u.test(String(error));
 }
 
-async function translateWithPDFTranslate(text: string, itemID: number): Promise<string> {
+async function raceWithTimeoutAndCancellation<T>(
+  request: Promise<T>,
+  timeoutMs: number,
+  cancellation: CancellationToken,
+): Promise<T> {
+  if (cancellation.cancelled) throw new RunCancelledError();
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let removeCancelListener: () => void = () => undefined;
+    const cleanup = () => {
+      clearTimeout(timeoutID);
+      removeCancelListener();
+    };
+    const finish = (handler: (value: any) => void, value: any) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      handler(value);
+    };
+    const onCancel = () => finish(reject, new RunCancelledError());
+
+    const timeoutID = setTimeout(() => {
+      finish(reject, new Error(`翻译请求超过 ${Math.round(timeoutMs / 1000)} 秒，已跳过。`));
+    }, timeoutMs);
+    removeCancelListener = cancellation.onCancel(onCancel);
+
+    request.then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+  });
+}
+
+async function cancellableDelay(
+  milliseconds: number,
+  cancellation: CancellationToken,
+): Promise<void> {
+  if (milliseconds <= 0) return;
+  if (cancellation.cancelled) throw new RunCancelledError();
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let removeCancelListener: () => void = () => undefined;
+    const finish = (handler: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutID);
+      removeCancelListener();
+      handler();
+    };
+    const onCancel = () => finish(() => reject(new RunCancelledError()));
+
+    const timeoutID = setTimeout(() => finish(resolve), milliseconds);
+    removeCancelListener = cancellation.onCancel(onCancel);
+  });
+}
+
+async function translateWithPDFTranslate(
+  text: string,
+  itemID: number,
+): Promise<TranslationResponse> {
   const pdfTranslate = (Zotero as any).PDFTranslate;
   if (!pdfTranslate?.api?.translate) {
     throw new Error(
@@ -112,10 +178,11 @@ async function translateWithPDFTranslate(text: string, itemID: number): Promise<
   if (!result || isFailureText(result)) {
     throw new Error(result || "Translate for Zotero 未返回译文，请检查翻译服务配置或网络状态。");
   }
-  return result;
+  const actualService = String(task?.service || selectedService || "").trim();
+  return { text: result, engineTag: getCacheEngineTag(actualService) };
 }
 
-async function translateWithOllama(text: string): Promise<string> {
+async function translateWithOllama(text: string): Promise<TranslationResponse> {
   const baseURL = getOllamaURL();
   const model = getOllamaModel();
   const url = `${baseURL}/api/chat`;
@@ -128,7 +195,7 @@ async function translateWithOllama(text: string): Promise<string> {
       {
         role: "system",
         content:
-          "你是专业的生物医学论文翻译助手。把用户提供的英文准确翻译为简体中文。保留基因、蛋白、药物、统计学符号、数字、单位、图表编号和文献引用；不要总结，不要解释，不要添加前言，只输出译文。",
+          "你是专业的生物医学论文翻译助手。把用户提供的英文准确翻译为简体中文。保留基因、蛋白、药物、统计学符号、数字、单位、图表编号和文献引用；不要总结，不要解释，不要添加前言，只输出译文。如果出现 [[BRSEG_0000]] 这类分段标记，必须逐字原样保留标记及其顺序。",
       },
       {
         role: "user",
@@ -146,7 +213,7 @@ async function translateWithOllama(text: string): Promise<string> {
     },
     body: JSON.stringify(body),
     responseType: "json",
-    timeout: 180000,
+    timeout: getRequestTimeoutMs(),
   });
 
   if (!xhr || xhr.status < 200 || xhr.status >= 300) {
@@ -166,90 +233,37 @@ async function translateWithOllama(text: string): Promise<string> {
   if (!result || typeof result !== "string") {
     throw new Error("Ollama 未返回有效译文。请确认 Ollama 已启动、模型名称正确并可正常运行。");
   }
-  return result.trim();
+  return { text: result.trim(), engineTag: getCacheEngineTag() };
 }
 
 async function translateText(
   text: string,
   itemID: number,
   engine: TranslationEngine,
-): Promise<string> {
+): Promise<TranslationResponse> {
   if (engine === "ollama") {
     return translateWithOllama(text);
   }
   return translateWithPDFTranslate(text, itemID);
 }
 
-function hardSplitText(text: string, maxChars: number): string[] {
-  const result: string[] = [];
-  let rest = text.trim();
-  while (rest.length > maxChars) {
-    const window = rest.slice(0, maxChars + 1);
-    let splitAt = Math.max(
-      window.lastIndexOf(" "),
-      window.lastIndexOf(", "),
-      window.lastIndexOf("; "),
-    );
-    if (splitAt < Math.floor(maxChars * 0.55)) splitAt = maxChars;
-    const chunk = rest.slice(0, splitAt).trim();
-    if (chunk) result.push(chunk);
-    rest = rest.slice(splitAt).trim();
-  }
-  if (rest) result.push(rest);
-  return result;
-}
-
-function splitTextForRequest(text: string, maxChars: number): string[] {
-  const source = text.trim();
-  if (source.length <= maxChars) return [source];
-
-  const sentences = source.match(/[^.!?。！？；;]+(?:[.!?。！？；;]+|$)/gu) || [source];
-  const chunks: string[] = [];
-  let current = "";
-
-  const flush = () => {
-    const value = current.trim();
-    if (value) chunks.push(value);
-    current = "";
-  };
-
-  for (const sentenceRaw of sentences) {
-    const sentence = sentenceRaw.trim();
-    if (!sentence) continue;
-
-    if (sentence.length > maxChars) {
-      flush();
-      chunks.push(...hardSplitText(sentence, maxChars));
-      continue;
-    }
-
-    const candidate = current ? `${current} ${sentence}` : sentence;
-    if (candidate.length > maxChars) {
-      flush();
-      current = sentence;
-    } else {
-      current = candidate;
-    }
-  }
-  flush();
-  return chunks.length ? chunks : hardSplitText(source, maxChars);
-}
-
 async function translateTextLimited(
   text: string,
-  itemID: number,
-  engine: TranslationEngine,
-): Promise<string> {
+  request: (chunk: string) => Promise<TranslationResponse>,
+): Promise<TranslationResponse> {
   const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
   if (chunks.length === 1) {
-    return translateText(chunks[0], itemID, engine);
+    return request(chunks[0]);
   }
 
   const translated: string[] = [];
+  let engineTag = "";
   for (const chunk of chunks) {
-    translated.push(await translateText(chunk, itemID, engine));
+    const response = await request(chunk);
+    translated.push(response.text);
+    engineTag = response.engineTag;
   }
-  return translated.join(" ").trim();
+  return { text: translated.join(" ").trim(), engineTag };
 }
 
 function getInternalReader(reader: any): any {
@@ -296,28 +310,54 @@ function isDeadObjectError(error: unknown): boolean {
 
 function nextGeneration(reader: any): number {
   const current = runStates.get(reader) || { generation: 0, running: false };
+  current.cancellation?.cancel();
   current.generation += 1;
   current.running = true;
+  current.cancellation = new CancellationToken();
   runStates.set(reader, current);
   return current.generation;
 }
 
 function cancelRun(reader: any): void {
   const current = runStates.get(reader) || { generation: 0, running: false };
+  current.cancellation?.cancel();
   current.generation += 1;
   current.running = false;
+  current.cancellation = undefined;
   runStates.set(reader, current);
 }
 
 function isCurrentRun(reader: any, generation: number, doc: Document): boolean {
   const state = runStates.get(reader);
-  if (!state || !state.running || state.generation !== generation) return false;
+  if (
+    !state ||
+    !state.running ||
+    state.generation !== generation ||
+    state.cancellation?.cancelled
+  ) {
+    return false;
+  }
 
   try {
     return getSDTDocument(reader) === doc && !!doc.querySelector("#sdt-content");
   } catch (_) {
     return false;
   }
+}
+
+function getRunCancellation(reader: any, generation: number): CancellationToken {
+  const state = runStates.get(reader);
+  if (!state?.running || state.generation !== generation || !state.cancellation) {
+    throw new RunCancelledError();
+  }
+  return state.cancellation;
+}
+
+function finishRun(reader: any, generation: number): void {
+  const state = runStates.get(reader);
+  if (!state || state.generation !== generation) return;
+  state.running = false;
+  state.cancellation = undefined;
 }
 
 async function ensureReadingMode(reader: any): Promise<Document> {
@@ -417,7 +457,12 @@ function getPageIndexForRef(structure: any, refPath: string): number | undefined
     if (!Array.isArray(range) || range.length !== 2) continue;
     const start = Array.isArray(range[0]) ? range[0] : [];
     const end = Array.isArray(range[1]) ? range[1] : [];
-    if (start.length && end.length && compareRefPath(ref, start) >= 0 && compareRefPath(ref, end) < 0) {
+    if (
+      start.length &&
+      end.length &&
+      compareRefPath(ref, start) >= 0 &&
+      compareRefPath(ref, end) < 0
+    ) {
       return i;
     }
   }
@@ -467,38 +512,31 @@ function collectParagraphs(
     paragraphs.push({
       refPath,
       sourceText,
+      sourceElement: element,
       pageIndex,
-      translation: loadCached(itemKey, sourceText, engineTag),
+      translation: loadCachedTranslation(itemKey, sourceText, engineTag, isFailureText),
     });
   }
 
   return paragraphs;
 }
 
-function findSourceElement(doc: Document, refPath: string): HTMLElement | null {
-  try {
-    const elements = Array.from(doc.querySelectorAll("#sdt-content [data-ref-path]")) as HTMLElement[];
-    return elements.find((element) => element.dataset.refPath === refPath) || null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function findTranslationBlock(doc: Document, refPath: string): HTMLDivElement | null {
-  try {
-    const blocks = Array.from(doc.querySelectorAll(`.${TRANSLATION_CLASS}`)) as HTMLDivElement[];
-    return blocks.find((block) => block.dataset.sourceRefPath === refPath) || null;
-  } catch (_) {
-    return null;
-  }
-}
-
 function ensureTranslationBlock(doc: Document, paragraph: ReaderParagraph): HTMLDivElement | null {
-  const existing = findTranslationBlock(doc, paragraph.refPath);
-  if (existing) return existing;
+  if (paragraph.block?.ownerDocument === doc && paragraph.block.parentNode) {
+    return paragraph.block;
+  }
 
-  const source = findSourceElement(doc, paragraph.refPath);
-  if (!source) return null;
+  const source = paragraph.sourceElement;
+  if (source.ownerDocument !== doc || !source.parentNode) return null;
+
+  const sibling = source.nextElementSibling as HTMLDivElement | null;
+  if (
+    sibling?.classList.contains(TRANSLATION_CLASS) &&
+    sibling.dataset.sourceRefPath === paragraph.refPath
+  ) {
+    paragraph.block = sibling;
+    return sibling;
+  }
 
   const block = doc.createElement("div");
   block.className = TRANSLATION_CLASS;
@@ -517,6 +555,7 @@ function ensureTranslationBlock(doc: Document, paragraph: ReaderParagraph): HTML
   }
 
   source.after(block);
+  paragraph.block = block;
   return block;
 }
 
@@ -559,6 +598,18 @@ function markUnfinishedPaused(doc: Document, paragraphs: ReaderParagraph[]): voi
   }
 }
 
+function getViewportDistance(paragraph: ReaderParagraph, doc: Document): number {
+  try {
+    const rect = paragraph.sourceElement.getBoundingClientRect();
+    const viewportHeight = doc.defaultView?.innerHeight || 0;
+    if (rect.bottom >= 0 && rect.top <= viewportHeight) return 0;
+    if (rect.top > viewportHeight) return rect.top - viewportHeight;
+    return Math.abs(rect.bottom);
+  } catch (_) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
 async function translateParagraphs(
   reader: any,
   doc: Document,
@@ -571,61 +622,127 @@ async function translateParagraphs(
 ): Promise<void> {
   const maxErrors = getMaxConsecutiveErrors();
   const requestGapMs = getRequestGapMs();
+  const requestTimeoutMs = getRequestTimeoutMs();
   const configuredConcurrent = getMaxConcurrent();
   const concurrency = engine === "ollama" ? 1 : configuredConcurrent;
   const pendingIndexes = paragraphs
     .map((paragraph, index) => (paragraph.translation ? -1 : index))
     .filter((index) => index >= 0);
+  const viewportDistances = new Map(
+    pendingIndexes.map((index) => [index, getViewportDistance(paragraphs[index], doc)]),
+  );
+  pendingIndexes.sort(
+    (a, b) =>
+      (viewportDistances.get(a) ?? Number.MAX_SAFE_INTEGER) -
+      (viewportDistances.get(b) ?? Number.MAX_SAFE_INTEGER),
+  );
 
   if (!pendingIndexes.length) {
-    const state = runStates.get(reader);
-    if (state && state.generation === generation) state.running = false;
+    finishRun(reader, generation);
     return;
   }
 
+  const cancellation = getRunCancellation(reader, generation);
+  const jobItems: TranslationJobItem[] = pendingIndexes.map((paragraphIndex) => ({
+    id: String(paragraphIndex),
+    paragraphIndex,
+    text: paragraphs[paragraphIndex].sourceText,
+  }));
+  const jobs = packBatchItems(jobItems, getMaxCharsPerRequest(), getMaxBatchParagraphs());
+
   let cursor = 0;
+  let completed = 0;
   let failureStreak = 0;
   let aborted = false;
   let nextStartAt = Date.now();
 
   const waitForStartSlot = async () => {
+    if (cancellation.cancelled) throw new RunCancelledError();
     if (requestGapMs <= 0) return;
     const now = Date.now();
     const scheduled = Math.max(now, nextStartAt);
     nextStartAt = scheduled + requestGapMs;
     const wait = scheduled - now;
-    if (wait > 0) await Zotero.Promise.delay(wait);
+    await cancellableDelay(wait, cancellation);
+  };
+
+  const request = async (text: string): Promise<TranslationResponse> => {
+    await waitForStartSlot();
+    if (!isCurrentRun(reader, generation, doc)) throw new RunCancelledError();
+    return raceWithTimeoutAndCancellation(
+      translateText(text, itemID, engine),
+      requestTimeoutMs,
+      cancellation,
+    );
+  };
+
+  const translateJob = async (
+    job: TranslationJobItem[],
+  ): Promise<Array<{ paragraphIndex: number; response: TranslationResponse }>> => {
+    if (job.length === 1) {
+      const response = await translateTextLimited(job[0].text, request);
+      return [{ paragraphIndex: job[0].paragraphIndex, response }];
+    }
+
+    const batchResponse = await request(buildBatchPayload(job));
+    const parsed = parseBatchResult(batchResponse.text, job.length);
+    if (parsed) {
+      return job.map((item, index) => ({
+        paragraphIndex: item.paragraphIndex,
+        response: { text: parsed[index], engineTag: batchResponse.engineTag },
+      }));
+    }
+
+    // Some engines translate or remove structural markers. Retrying these few
+    // items individually is slower, but guarantees paragraph alignment.
+    const fallback: Array<{ paragraphIndex: number; response: TranslationResponse }> = [];
+    for (const item of job) {
+      fallback.push({
+        paragraphIndex: item.paragraphIndex,
+        response: await translateTextLimited(item.text, request),
+      });
+    }
+    return fallback;
   };
 
   const worker = async () => {
     while (!aborted && isCurrentRun(reader, generation, doc)) {
       const slot = cursor++;
-      if (slot >= pendingIndexes.length) return;
-      const paragraphIndex = pendingIndexes[slot];
-      const paragraph = paragraphs[paragraphIndex];
-      const block = ensureTranslationBlock(doc, paragraph);
-      if (!block) continue;
+      if (slot >= jobs.length) return;
+      const job = jobs[slot];
 
-      block.dataset.state = "loading";
-      block.textContent = `正在翻译…（${slot + 1}/${pendingIndexes.length}）`;
-
-      await waitForStartSlot();
-      if (aborted || !isCurrentRun(reader, generation, doc)) return;
+      for (const item of job) {
+        const block = ensureTranslationBlock(doc, paragraphs[item.paragraphIndex]);
+        if (!block) continue;
+        block.dataset.state = "loading";
+        block.textContent = `正在翻译…（已完成 ${completed}/${pendingIndexes.length}）`;
+      }
 
       try {
-        const translation = await translateTextLimited(paragraph.sourceText, itemID, engine);
+        const results = await translateJob(job);
         if (!isCurrentRun(reader, generation, doc)) return;
 
-        paragraph.translation = translation;
-        saveCached(itemKey, paragraph.sourceText, translation, engineTag);
-        failureStreak = 0;
+        for (const { paragraphIndex, response } of results) {
+          const paragraph = paragraphs[paragraphIndex];
+          paragraph.translation = response.text;
+          saveCachedTranslation(
+            itemKey,
+            paragraph.sourceText,
+            response.text,
+            response.engineTag || engineTag,
+            isFailureText,
+          );
 
-        const liveBlock = findTranslationBlock(doc, paragraph.refPath);
-        if (liveBlock) {
-          liveBlock.dataset.state = "done";
-          liveBlock.textContent = translation;
+          const liveBlock = paragraph.block;
+          if (liveBlock?.parentNode) {
+            liveBlock.dataset.state = "done";
+            liveBlock.textContent = response.text;
+          }
+          completed += 1;
         }
+        failureStreak = 0;
       } catch (error: any) {
+        if (isCancellationError(error)) return;
         if (isDeadObjectError(error)) {
           aborted = true;
           cancelRun(reader);
@@ -634,26 +751,27 @@ async function translateParagraphs(
         if (!isCurrentRun(reader, generation, doc)) return;
 
         failureStreak += 1;
-        const liveBlock = findTranslationBlock(doc, paragraph.refPath);
-        if (liveBlock) {
-          liveBlock.dataset.state = "error";
-          liveBlock.textContent = `翻译失败：${error?.message || String(error)}`;
+        for (const item of job) {
+          const liveBlock = paragraphs[item.paragraphIndex].block;
+          if (liveBlock?.parentNode) {
+            liveBlock.dataset.state = "error";
+            liveBlock.textContent = `翻译失败：${error?.message || String(error)}`;
+          }
         }
 
         if (failureStreak >= maxErrors) {
           aborted = true;
-          cancelRun(reader);
           markUnfinishedPaused(doc, paragraphs);
+          cancelRun(reader);
           return;
         }
       }
     }
   };
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, pendingIndexes.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker()));
 
-  const state = runStates.get(reader);
-  if (state && state.generation === generation) state.running = false;
+  finishRun(reader, generation);
 }
 
 async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
@@ -705,6 +823,7 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
       engineTag,
     );
   } finally {
+    flushTranslationCacheIndex();
     const liveRoot = getDocumentRoot(getSDTDocument(reader) || doc);
     if (liveRoot) delete liveRoot.dataset.bilingualReaderRunning;
   }
@@ -722,7 +841,7 @@ export async function toggleBilingualReading(reader: any): Promise<void> {
 
     await prepareAndRun(reader, false);
   } catch (error: any) {
-    if (!isDeadObjectError(error)) {
+    if (!isDeadObjectError(error) && !isCancellationError(error)) {
       showError(reader, error?.message || String(error));
     }
   }
@@ -736,7 +855,7 @@ export async function refreshBilingualReading(reader: any): Promise<void> {
     await Zotero.Promise.delay(30);
     await prepareAndRun(reader, false);
   } catch (error: any) {
-    if (!isDeadObjectError(error)) {
+    if (!isDeadObjectError(error) && !isCancellationError(error)) {
       showError(reader, error?.message || String(error));
     }
   }
@@ -751,6 +870,15 @@ function getPromptWindow(reader: any): any {
 }
 
 export function configureTranslation(reader: any): void {
+  try {
+    const preferencesWindow = Zotero.Utilities.Internal.openPreferences(PREFERENCES_PANE_ID);
+    if (preferencesWindow) return;
+  } catch (error) {
+    Zotero.logError(error as Error);
+  }
+
+  // Retain a minimal fallback for unusual installations where Zotero cannot
+  // open a registered plugin preference pane.
   const win = getPromptWindow(reader);
   if (!win?.prompt) {
     showError(reader, "无法打开翻译设置窗口。请在 Zotero 设置 → 中英对照 中配置。");

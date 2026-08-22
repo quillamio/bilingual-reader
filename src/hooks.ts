@@ -1,10 +1,9 @@
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
-import {
-  registerBilingualReader,
-  unregisterBilingualReader,
-} from "./bilingualReader";
+import { registerBilingualReader, unregisterBilingualReader } from "./bilingualReader";
 import { registerPrefsScripts } from "./modules/preferenceScript";
+import { migrateLegacyPreferences } from "./settings";
+import { flushTranslationCacheIndex } from "./translationCache";
 
 async function registerPreferencesPane(): Promise<void> {
   await Zotero.PreferencePanes.register({
@@ -16,25 +15,22 @@ async function registerPreferencesPane(): Promise<void> {
 }
 
 async function onStartup() {
-  await Promise.all([
-    Zotero.initializationPromise,
-    Zotero.unlockPromise,
-    Zotero.uiReadyPromise,
-  ]);
+  await Promise.all([Zotero.initializationPromise, Zotero.unlockPromise, Zotero.uiReadyPromise]);
 
+  migrateLegacyPreferences();
   initLocale();
   await registerPreferencesPane();
   registerBilingualReader();
 
-  await Promise.all(
-    Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
-  );
+  await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 
   addon.data.initialized = true;
 }
 
 async function onMainWindowLoad(_win: _ZoteroTypes.MainWindow): Promise<void> {
-  addon.data.ztoolkit = createZToolkit();
+  // The toolkit is process-scoped. Replacing it for every main window would
+  // orphan registrations owned by the previous instance.
+  addon.data.ztoolkit ||= createZToolkit();
 }
 
 async function onMainWindowUnload(_win: Window): Promise<void> {
@@ -43,6 +39,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 
 function onShutdown(): void {
   unregisterBilingualReader();
+  flushTranslationCacheIndex();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   addon.data.alive = false;
