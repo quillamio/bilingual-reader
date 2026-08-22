@@ -5,5 +5,7 @@ pref("ollama.model", "gpt-oss:20b");
 pref("requestGapMs", 250);
 pref("maxConcurrent", 2);
 pref("maxCharsPerRequest", 2800);
+pref("maxBatchParagraphs", 6);
 pref("maxConsecutiveErrors", 3);
+pref("requestTimeoutMs", 60000);
 pref("skipLastPages", 1);

@@ -1,31 +1,38 @@
 import {
   DEFAULT_MAX_CHARS_PER_REQUEST,
+  DEFAULT_MAX_BATCH_PARAGRAPHS,
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_MAX_CONSECUTIVE_ERRORS,
   DEFAULT_OLLAMA_MODEL,
   DEFAULT_OLLAMA_URL,
   DEFAULT_REQUEST_GAP_MS,
+  DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_SKIP_LAST_PAGES,
   getEngine,
   getMaxCharsPerRequest,
+  getMaxBatchParagraphs,
   getMaxConcurrent,
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
   getPDFTranslateService,
   getRequestGapMs,
+  getRequestTimeoutMs,
   getSkipLastPages,
   setEngine,
   setMaxCharsPerRequest,
+  setMaxBatchParagraphs,
   setMaxConcurrent,
   setMaxConsecutiveErrors,
   setOllamaModel,
   setOllamaURL,
   setPDFTranslateService,
   setRequestGapMs,
+  setRequestTimeoutMs,
   setSkipLastPages,
   type TranslationEngine,
 } from "../settings";
+import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
 
 function getElement<T extends HTMLElement>(doc: Document, id: string): T | null {
   return doc.getElementById(id) as T | null;
@@ -68,17 +75,19 @@ function saveSettings(doc: Document): void {
   setSkipLastPages(
     readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
   );
-  setMaxConcurrent(
-    readNumberInput(doc, "bilingualreader-max-concurrent", DEFAULT_MAX_CONCURRENT),
-  );
-  setRequestGapMs(
-    readNumberInput(doc, "bilingualreader-request-gap", DEFAULT_REQUEST_GAP_MS),
-  );
+  setMaxConcurrent(readNumberInput(doc, "bilingualreader-max-concurrent", DEFAULT_MAX_CONCURRENT));
+  setRequestGapMs(readNumberInput(doc, "bilingualreader-request-gap", DEFAULT_REQUEST_GAP_MS));
   setMaxCharsPerRequest(
     readNumberInput(doc, "bilingualreader-max-chars", DEFAULT_MAX_CHARS_PER_REQUEST),
   );
+  setMaxBatchParagraphs(
+    readNumberInput(doc, "bilingualreader-max-batch-paragraphs", DEFAULT_MAX_BATCH_PARAGRAPHS),
+  );
   setMaxConsecutiveErrors(
     readNumberInput(doc, "bilingualreader-max-errors", DEFAULT_MAX_CONSECUTIVE_ERRORS),
+  );
+  setRequestTimeoutMs(
+    readNumberInput(doc, "bilingualreader-request-timeout", DEFAULT_REQUEST_TIMEOUT_MS),
   );
 
   setStatus(doc, "设置已保存。返回正在阅读的 PDF 后点击 🔄 即可应用。 ");
@@ -92,6 +101,9 @@ async function testOllama(doc: Document): Promise<void> {
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
 
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-ollama");
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
   setStatus(doc, `正在连接 ${url} …`);
   try {
     const xhr = await Zotero.HTTP.request("GET", `${url}/api/tags`, {
@@ -104,7 +116,9 @@ async function testOllama(doc: Document): Promise<void> {
 
     const response: any = xhr.response;
     const models = Array.isArray(response?.models)
-      ? response.models.map((entry: any) => String(entry?.name || entry?.model || "")).filter(Boolean)
+      ? response.models
+          .map((entry: any) => String(entry?.name || entry?.model || ""))
+          .filter(Boolean)
       : [];
     const hasModel = models.includes(model);
     if (models.length) {
@@ -119,7 +133,24 @@ async function testOllama(doc: Document): Promise<void> {
     }
   } catch (error: any) {
     setStatus(doc, `Ollama 连接失败：${error?.message || String(error)}`);
+  } finally {
+    if (button) button.disabled = false;
   }
+}
+
+function updateCacheStatus(doc: Document): void {
+  const status = getElement<HTMLElement>(doc, "bilingualreader-cache-status");
+  if (!status) return;
+  const stats = getTranslationCacheStats();
+  const sizeMiB = ((stats.chars * 2) / (1024 * 1024)).toFixed(1);
+  status.textContent = `缓存 ${stats.entries} 段，约 ${sizeMiB} MiB（按 UTF-16 估算）。`;
+}
+
+function clearCache(doc: Document): void {
+  const removed = clearTranslationCache();
+  const sizeMiB = ((removed.chars * 2) / (1024 * 1024)).toFixed(1);
+  setStatus(doc, `已清除 ${removed.entries} 个缓存项，约 ${sizeMiB} MiB。`);
+  updateCacheStatus(doc);
 }
 
 function populatePDFTranslateServices(doc: Document): void {
@@ -144,12 +175,14 @@ function populatePDFTranslateServices(doc: Document): void {
   let services: any[] = [];
   try {
     version = api.getVersion?.() || "";
-    services = api.getServices?.() || [];
+    const available = api.getServices?.();
+    services = Array.isArray(available) ? available : [];
   } catch (_) {
     services = [];
   }
 
   for (const service of services) {
+    if (service?.type && service.type !== "sentence") continue;
     const id = String(service?.id || "").trim();
     if (!id) continue;
     const option = doc.createElementNS("http://www.w3.org/1999/xhtml", "option");
@@ -181,7 +214,12 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const maxConcurrent = getElement<HTMLInputElement>(doc, "bilingualreader-max-concurrent");
   const gap = getElement<HTMLInputElement>(doc, "bilingualreader-request-gap");
   const maxChars = getElement<HTMLInputElement>(doc, "bilingualreader-max-chars");
+  const maxBatchParagraphs = getElement<HTMLInputElement>(
+    doc,
+    "bilingualreader-max-batch-paragraphs",
+  );
   const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
+  const requestTimeout = getElement<HTMLInputElement>(doc, "bilingualreader-request-timeout");
 
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
@@ -190,10 +228,13 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (maxConcurrent) maxConcurrent.value = String(getMaxConcurrent());
   if (gap) gap.value = String(getRequestGapMs());
   if (maxChars) maxChars.value = String(getMaxCharsPerRequest());
+  if (maxBatchParagraphs) maxBatchParagraphs.value = String(getMaxBatchParagraphs());
   if (maxErrors) maxErrors.value = String(getMaxConsecutiveErrors());
+  if (requestTimeout) requestTimeout.value = String(getRequestTimeoutMs());
 
   updateBackendVisibility(doc);
   populatePDFTranslateServices(doc);
+  updateCacheStatus(doc);
 
   engine?.addEventListener("change", () => {
     updateBackendVisibility(doc);
@@ -215,6 +256,13 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
     "click",
     () => {
       void testOllama(doc);
+    },
+  );
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-clear-cache")?.addEventListener(
+    "click",
+    () => {
+      clearCache(doc);
     },
   );
 }

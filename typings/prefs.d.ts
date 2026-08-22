@@ -7,9 +7,17 @@
 declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
-      "baseURL": string;
-      "apiKey": string;
-      "model": string;
+      "engine": string;
+      "pdftranslate.service": string;
+      "ollama.url": string;
+      "ollama.model": string;
+      "requestGapMs": number;
+      "maxConcurrent": number;
+      "maxCharsPerRequest": number;
+      "maxBatchParagraphs": number;
+      "maxConsecutiveErrors": number;
+      "requestTimeoutMs": number;
+      "skipLastPages": number;
     };
   }
 }

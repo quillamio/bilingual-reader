@@ -7,13 +7,14 @@
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
 >
   <label><html:h2>中英对照阅读</html:h2></label>
-  <html:p style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px;">
-    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for Zotero；Ollama 作为可选后端保留。
+  <html:p style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px">
+    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for
+    Zotero；Ollama 作为可选后端保留。
   </html:p>
 
-  <hbox align="center" style="margin-bottom: 10px;">
-    <html:label for="bilingualreader-engine" style="min-width: 130px;">翻译后端</html:label>
-    <html:select id="bilingualreader-engine" style="min-width: 320px; padding: 4px 8px;">
+  <hbox align="center" style="margin-bottom: 10px">
+    <html:label for="bilingualreader-engine" style="min-width: 130px">翻译后端</html:label>
+    <html:select id="bilingualreader-engine" style="min-width: 320px; padding: 4px 8px">
       <html:option value="pdftranslate">Translate for Zotero（推荐）</html:option>
       <html:option value="ollama">Ollama</html:option>
     </html:select>
@@ -22,28 +23,49 @@
 
 <groupbox id="bilingualreader-pdftranslate-section">
   <label><html:h3>Translate for Zotero</html:h3></label>
-  <html:p id="bilingualreader-pdftranslate-status" style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px;"></html:p>
+  <html:p
+    id="bilingualreader-pdftranslate-status"
+    style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px"
+  ></html:p>
 
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-pdftranslate-service" style="min-width: 130px;">翻译服务</html:label>
-    <html:select id="bilingualreader-pdftranslate-service" style="min-width: 380px; max-width: 560px; padding: 4px 8px;">
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-pdftranslate-service" style="min-width: 130px"
+      >翻译服务</html:label
+    >
+    <html:select
+      id="bilingualreader-pdftranslate-service"
+      style="min-width: 380px; max-width: 560px; padding: 4px 8px"
+    >
       <html:option value="">跟随 Translate for Zotero 当前默认服务</html:option>
     </html:select>
   </hbox>
 
-  <html:p style="line-height: 1.6; margin: 0; max-width: 760px;">
-    推荐优先使用这里的 Translate for Zotero。Bilingual Reader 只负责分段、调度、缓存和双语排版；翻译服务本身的密钥、额度及其他参数仍由 Translate for Zotero 管理。
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    推荐优先使用这里的 Translate for Zotero。Bilingual Reader
+    只负责分段、调度、缓存和双语排版；翻译服务本身的密钥、额度及其他参数仍由 Translate for Zotero
+    管理。
   </html:p>
 </groupbox>
 
 <groupbox id="bilingualreader-page-section">
   <label><html:h3>翻译范围</html:h3></label>
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-skip-last-pages" style="min-width: 180px;">不翻译末尾页数</html:label>
-    <html:input id="bilingualreader-skip-last-pages" type="number" min="0" max="50" step="1" style="width: 110px; padding: 4px 6px;" />
-    <html:span style="margin-left: 10px; max-width: 520px;">默认 1 页。常用于跳过论文最后的参考文献页；设为 0 表示不按页数跳过。</html:span>
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-skip-last-pages" style="min-width: 180px"
+      >不翻译末尾页数</html:label
+    >
+    <html:input
+      id="bilingualreader-skip-last-pages"
+      type="number"
+      min="0"
+      max="50"
+      step="1"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 1 页。常用于跳过论文最后的参考文献页；设为 0 表示不按页数跳过。</html:span
+    >
   </hbox>
-  <html:p style="line-height: 1.6; margin: 0; max-width: 760px;">
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
     插件同时继续跳过 Zotero 已明确标记为参考文献的结构化段落。页数限制按 PDF 物理页计算。
   </html:p>
 </groupbox>
@@ -51,55 +73,165 @@
 <groupbox id="bilingualreader-speed-section">
   <label><html:h3>速度与稳定性</html:h3></label>
 
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-max-concurrent" style="min-width: 180px;">最大并发请求</html:label>
-    <html:input id="bilingualreader-max-concurrent" type="number" min="1" max="3" step="1" style="width: 110px; padding: 4px 6px;" />
-    <html:span style="margin-left: 10px; max-width: 520px;">默认 2。通常比完全串行明显更快，同时避免一次发出过多请求。</html:span>
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-max-concurrent" style="min-width: 180px"
+      >最大并发请求</html:label
+    >
+    <html:input
+      id="bilingualreader-max-concurrent"
+      type="number"
+      min="1"
+      max="3"
+      step="1"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 2。通常比完全串行明显更快，同时避免一次发出过多请求。</html:span
+    >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-request-gap" style="min-width: 180px;">请求启动间隔（毫秒）</html:label>
-    <html:input id="bilingualreader-request-gap" type="number" min="0" max="5000" step="50" style="width: 110px; padding: 4px 6px;" />
-    <html:span style="margin-left: 10px; max-width: 520px;">默认 250。公共免费服务若频繁限流，可提高到 500–1000。</html:span>
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-request-gap" style="min-width: 180px"
+      >请求启动间隔（毫秒）</html:label
+    >
+    <html:input
+      id="bilingualreader-request-gap"
+      type="number"
+      min="0"
+      max="5000"
+      step="50"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 250。公共免费服务若频繁限流，可提高到 500–1000。</html:span
+    >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-max-chars" style="min-width: 180px;">单次请求最大字符数</html:label>
-    <html:input id="bilingualreader-max-chars" type="number" min="500" max="8000" step="100" style="width: 110px; padding: 4px 6px;" />
-    <html:span style="margin-left: 10px; max-width: 520px;">默认 2800。超长段落会自动拆成较小片段，降低大文本请求失败概率。</html:span>
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-max-chars" style="min-width: 180px"
+      >单次请求最大字符数</html:label
+    >
+    <html:input
+      id="bilingualreader-max-chars"
+      type="number"
+      min="500"
+      max="8000"
+      step="100"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 2800。超长段落会自动拆成较小片段，降低大文本请求失败概率。</html:span
+    >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 10px;">
-    <html:label for="bilingualreader-max-errors" style="min-width: 180px;">连续失败后暂停</html:label>
-    <html:input id="bilingualreader-max-errors" type="number" min="1" max="20" step="1" style="width: 110px; padding: 4px 6px;" />
-    <html:span style="margin-left: 10px; max-width: 520px;">默认 3 次。避免失效服务持续请求整篇论文。</html:span>
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-max-batch-paragraphs" style="min-width: 180px"
+      >单次合并段落数</html:label
+    >
+    <html:input
+      id="bilingualreader-max-batch-paragraphs"
+      type="number"
+      min="1"
+      max="12"
+      step="1"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 6。短段落会在字符上限内合并请求；标记未被翻译服务保留时会自动逐段重试。设为 1
+      可关闭合并。</html:span
+    >
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-request-timeout" style="min-width: 180px"
+      >单次请求超时（毫秒）</html:label
+    >
+    <html:input
+      id="bilingualreader-request-timeout"
+      type="number"
+      min="5000"
+      max="300000"
+      step="5000"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 60000。防止失效服务永久占用任务；使用较慢的本地模型时可提高。</html:span
+    >
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 10px">
+    <html:label for="bilingualreader-max-errors" style="min-width: 180px"
+      >连续失败后暂停</html:label
+    >
+    <html:input
+      id="bilingualreader-max-errors"
+      type="number"
+      min="1"
+      max="20"
+      step="1"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >默认 3 次。避免失效服务持续请求整篇论文。</html:span
+    >
   </hbox>
 
   <hbox align="center">
-    <html:button id="bilingualreader-save" type="button" style="padding: 6px 16px;">保存设置</html:button>
-    <html:span id="bilingualreader-settings-status" style="margin-left: 12px; line-height: 1.5;"></html:span>
+    <html:button id="bilingualreader-save" type="button" style="padding: 6px 16px"
+      >保存设置</html:button
+    >
+    <html:span
+      id="bilingualreader-settings-status"
+      style="margin-left: 12px; line-height: 1.5"
+    ></html:span>
+  </hbox>
+</groupbox>
+
+<groupbox id="bilingualreader-cache-section">
+  <label><html:h3>翻译缓存</html:h3></label>
+  <html:p id="bilingualreader-cache-status" style="line-height: 1.6; margin: 0 0 8px 0"></html:p>
+  <hbox align="center">
+    <html:button id="bilingualreader-clear-cache" type="button" style="padding: 5px 12px"
+      >清除翻译缓存</html:button
+    >
+    <html:span style="margin-left: 10px; max-width: 560px"
+      >缓存采用自动上限和最近使用淘汰，避免长期阅读后偏好存储无限增长。</html:span
+    >
   </hbox>
 </groupbox>
 
 <groupbox id="bilingualreader-ollama-section">
   <label><html:h3>Ollama（可选）</html:h3></label>
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-ollama-url" style="min-width: 130px;">服务地址</html:label>
-    <html:input id="bilingualreader-ollama-url" type="text" style="width: 430px; padding: 4px 6px;" placeholder="http://127.0.0.1:11434" />
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-ollama-url" style="min-width: 130px">服务地址</html:label>
+    <html:input
+      id="bilingualreader-ollama-url"
+      type="text"
+      style="width: 430px; padding: 4px 6px"
+      placeholder="http://127.0.0.1:11434"
+    />
   </hbox>
-  <hbox align="center" style="margin-bottom: 8px;">
-    <html:label for="bilingualreader-ollama-model" style="min-width: 130px;">模型</html:label>
-    <html:input id="bilingualreader-ollama-model" type="text" style="width: 430px; padding: 4px 6px;" placeholder="gpt-oss:20b" />
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-ollama-model" style="min-width: 130px">模型</html:label>
+    <html:input
+      id="bilingualreader-ollama-model"
+      type="text"
+      style="width: 430px; padding: 4px 6px"
+      placeholder="gpt-oss:20b"
+    />
   </hbox>
   <hbox align="center">
     <spacer width="130" />
-    <html:button id="bilingualreader-test-ollama" type="button" style="padding: 5px 12px;">测试 Ollama 连接</html:button>
+    <html:button id="bilingualreader-test-ollama" type="button" style="padding: 5px 12px"
+      >测试 Ollama 连接</html:button
+    >
   </hbox>
 </groupbox>
 
 <groupbox>
   <label><html:h3>刷新说明</html:h3></label>
-  <html:p style="line-height: 1.6; margin: 0; max-width: 760px;">
-    修改翻译后端、具体翻译服务或速度参数后，回到 PDF 阅读器点击 🔄。插件会取消旧任务、清除旧错误结果，并按照当前设置重新调度未成功的段落。
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    修改翻译后端、具体翻译服务或速度参数后，回到 PDF 阅读器点击
+    🔄。插件会取消旧任务、清除旧错误结果，并按照当前设置重新调度未成功的段落。
   </html:p>
 </groupbox>
