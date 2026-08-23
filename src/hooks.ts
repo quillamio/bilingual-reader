@@ -32,7 +32,7 @@ function installPreferencesBrand(win: Window): void {
     "http://www.w3.org/1999/xhtml",
     "img",
   ) as HTMLImageElement;
-  image.src = "icons/mahjong-red-dragon.svg";
+  image.src = `${rootURI}content/icons/mahjong-red-dragon.svg`;
   image.alt = "Bilingual Reader";
   image.width = 64;
   image.height = 64;
