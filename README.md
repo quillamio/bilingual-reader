@@ -1,20 +1,17 @@
-<p align="center">
-  <img src="addon/content/icons/mahjong-red-dragon.svg" width="88" alt="Bilingual Reader" />
-</p>
+<p align="center" style="font-size:72px">🀄</p>
 
 # Zotero Bilingual Reader
 
 Zotero Bilingual Reader 是一个面向 **Zotero 10** 的 PDF 段落中英对照阅读插件。它利用 Zotero 10 新 PDF 阅读模式中的结构化文档文本，把英文原文和中文译文按段落连续排列，适合医学、生物学及其他英文论文精读。
 
-## v0.1.6：更简洁的阅读界面 + PDF 导出
+## v0.1.7：原生 Emoji + 更可靠的 PDF 导出
 
-v0.1.6 主要优化阅读器界面，并新增中英对照 PDF 导出：
+v0.1.7 主要修复两个实际使用问题：
 
-- 阅读器顶部不再显示 **⚙ 设置按钮**；所有翻译设置统一放在 `Zotero → 设置 → 中英对照`。
-- 原来的“中英”文字按钮改为麻将红中图标：<img src="addon/content/icons/mahjong-red-dragon.svg" width="20" alt="中英对照" />。
-- 新增打印机按钮：<img src="addon/content/icons/printer.svg" width="20" alt="导出 PDF" />，可把当前已经成功翻译的中英对照阅读结果导出为 PDF，并自动加入当前文献的 Zotero 条目附件中。
-- 插件自身图标同步改为麻将红中图标。
-- 保留 🔄 刷新按钮，用于取消旧任务、清除错误结果，并按当前设置重新翻译。
+- 阅读器不再加载外部或本地图片图标，直接使用系统 Emoji：**🀄** 表示开启 / 关闭中英对照，**🖨️** 表示导出 PDF。
+- 插件管理器仍使用本地、无外部依赖的简化红中图标作为兼容回退，避免不同系统对彩色 Emoji SVG 支持不一致。
+- PDF 导出不再尝试直接取得 Zotero 阅读模式内部 iframe 的 `browsingContext`；该对象在部分 Zotero 10 构建中不可访问，因此会出现“当前 Zotero 10 阅读视图不支持直接生成 PDF”。
+- 新版改为调用 Zotero 自身的 `HiddenBrowser`，把当前已经生成的中英对照内容复制到一个临时隐藏打印页面，再使用 Zotero / Firefox 自身的 PDF 打印上下文生成 PDF，最后自动加入当前文献的 Zotero 条目附件。
 
 ## 主要功能
 
@@ -109,28 +106,31 @@ gpt-oss:20b
 
 PDF 阅读器顶部保留三个与本插件相关的操作：
 
-- <img src="addon/content/icons/mahjong-red-dragon.svg" width="20" alt="中英对照" />：开启 / 关闭段落中英对照。
+- **🀄**：开启 / 关闭段落中英对照。
 - **🔄**：取消当前任务、清除错误结果，并按照当前设置重新组织未成功译文。
-- <img src="addon/content/icons/printer.svg" width="20" alt="导出 PDF" />：将当前中英对照结果导出为 PDF，并加入当前文献的 Zotero 条目附件。
+- **🖨️**：将当前中英对照结果导出为 PDF，并加入当前文献的 Zotero 条目附件。
 
 **不再显示 ⚙。** 修改翻译后端、翻译服务、范围和速度参数，请统一前往 `Zotero → 设置 → 中英对照`。
 
 ## 导出中英对照 PDF
 
-完成部分或全部翻译后，点击阅读器顶部的打印机图标 <img src="addon/content/icons/printer.svg" width="20" alt="导出 PDF" />。
+完成部分或全部翻译后，点击阅读器顶部的 **🖨️**。
 
 插件会：
 
 1. 检查当前阅读模式中是否存在成功译文。
 2. 如果仍有失败、暂停或正在翻译的段落，会询问是否只导出已经成功的译文。
-3. 使用 Zotero 10 / Firefox 自带的 PDF 打印能力，把当前阅读模式中的英文原文和成功中文译文生成 PDF。
-4. 自动把生成的 PDF 导入当前文献的父级 Zotero 条目，附件标题格式为：
+3. 复制当前结构化阅读内容及已经成功的中文译文到 Zotero 的临时隐藏打印页面。
+4. 使用 Zotero / Firefox 自身的 PDF 打印能力生成可搜索、可复制文字的 PDF。
+5. 自动把生成的 PDF 导入当前文献的父级 Zotero 条目，附件标题格式为：
 
 ```text
 论文标题 - 中英对照翻译
 ```
 
 导出过程中，`翻译失败`、`等待翻译`、`已暂停` 等状态提示不会写入最终 PDF。
+
+v0.1.7 不再依赖当前 Zotero 阅读模式 iframe 是否直接暴露 `browsingContext`。这正是 v0.1.6 在部分 Zotero 10 环境中点击 🖨️ 后立即提示“不支持直接生成 PDF”的原因。
 
 注意：当前 PDF 必须已经属于一个父级文献条目。如果 PDF 是 Zotero 中没有父级文献条目的独立附件，插件会提示先创建父级条目。
 
@@ -189,12 +189,12 @@ XPI 是 Zotero 插件包，不是 macOS 应用程序，不需要拖入“应用�
 ## 使用方法
 
 1. 在 Zotero 10 打开英文 PDF。
-2. 点击阅读器顶部的 <img src="addon/content/icons/mahjong-red-dragon.svg" width="20" alt="中英对照" />。
+2. 点击阅读器顶部的 **🀄**。
 3. 插件自动尝试进入 Zotero 10 阅读模式。
 4. 等待 Zotero 生成结构化文本。
 5. 中文译文逐段显示在英文原文下方。
-6. 如需重新请求，点击 🔄。
-7. 如需保存阅读结果，点击 <img src="addon/content/icons/printer.svg" width="20" alt="导出 PDF" /> 导出为 Zotero 条目附件。
+6. 如需重新请求，点击 **🔄**。
+7. 如需保存阅读结果，点击 **🖨️** 导出为 Zotero 条目附件。
 
 显示效果：
 
@@ -214,22 +214,21 @@ We further discovered that PRMT9 knockdown in THP1 cells...
 - 表格暂不逐单元格翻译。
 - 数学公式不会作为普通文本翻译。
 - 扫描版 PDF 是否可用取决于 Zotero 的结构化文本 / 文字识别结果。
-- PDF 导出基于当前 Zotero 阅读模式页面；尚未加载的复杂图像区域可能仍受 Zotero 阅读模式自身的延迟加载机制影响。
+- PDF 导出使用 Zotero 结构化阅读内容重新排版，因此它是“可搜索的双语阅读版 PDF”，不是原始出版社 PDF 的逐像素覆盖版本。
+- 某些由 Zotero 延迟加载、临时生成或受权限限制的复杂图像，在导出页面中仍可能缺失；正文和已成功译文是导出的核心内容。
 - Zotero 当前没有公开“阅读模式逐段扩展接口”，插件需要访问 Zotero 10 阅读器内部结构，因此 Zotero 后续修改内部实现时可能需要适配。
 
-## 图标来源
+## 图标说明
 
-麻将红中与打印机图标使用 Google Noto Emoji 图形并本地打包，避免阅读器联网加载图标。Google Noto Emoji 使用 Apache License 2.0。
+阅读器工具栏直接使用系统 Emoji：
 
-用户指定的视觉参考：
+```text
+🀄  中英对照
+🔄  重新翻译
+🖨️  导出 PDF
+```
 
-- https://em-content.zobj.net/source/google/298/mahjong-red-dragon_1f004.png
-- https://em-content.zobj.net/source/google/298/printer_1f5a8-fe0f.png
-
-官方图形来源：
-
-- https://github.com/googlefonts/noto-emoji/blob/main/svg/emoji_u1f004.svg
-- https://github.com/googlefonts/noto-emoji/blob/main/svg/emoji_u1f5a8.svg
+不再依赖 Google Emoji 图片、外部 CDN 或 `chrome://...` 图片地址。插件管理器图标使用本地简化红中图形作为兼容回退。
 
 ## macOS 兼容性
 
