@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.1.7
+
+- 阅读器工具栏不再加载图片图标，直接使用系统 Emoji：`🀄` 表示中英对照，`🖨️` 表示导出 PDF。
+- 插件管理器图标改为本地简化红中图形，避免复杂彩色 Emoji SVG 在部分 Zotero / macOS 环境中无法显示。
+- 修复 v0.1.6 点击 🖨️ 后提示“当前 Zotero 10 阅读视图不支持直接生成 PDF”的问题：不再直接读取阅读模式内部 iframe 的 `browsingContext`。
+- PDF 导出改为使用 Zotero 自带 `HiddenBrowser({ useHiddenFrame: false })` 创建临时隐藏打印页面，再调用其真实 `browsingContext.print()` 生成 PDF。
+- 导出内容从当前 `#sdt-content` 克隆，自动移除失败、暂停、等待等未成功译文，并使用独立 A4 打印样式重新排版。
+- 生成后的 PDF 仍通过 `Zotero.Attachments.importFromFile()` 自动保存为当前文献的子附件。
+
 ## v0.1.6
 
 - 阅读器工具栏取消 ⚙ 设置按钮，翻译后端、服务、范围和速度参数统一在 `Zotero → 设置 → 中英对照` 管理。
