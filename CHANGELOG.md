@@ -1,5 +1,12 @@
 # 更新日志
 
+## v0.1.8
+
+- 插件 description 更新为“Zotero 10 阅读模式 PDF 段落中英对照翻译”。
+- 插件元数据增加 `translation`、`reader`、`ai` 关键词，为插件商店收录准备检索信息。
+- 修复点击 🖨️ 导出时出现 `Cannot modify properties of a WrappedNative`：移除已不属于当前 `nsIPrintSettings` 的 `printToFile` 扩展属性，只使用 `outputDestination`、`outputFormat` 与 `toFileName` 等受支持打印设置。
+- 保留 Zotero HiddenBrowser 双语 HTML → PDF → 当前条目附件的导出流程。
+
 ## v0.1.7
 
 - 阅读器工具栏不再加载图片图标，直接使用系统 Emoji：`🀄` 表示中英对照，`🖨️` 表示导出 PDF。
