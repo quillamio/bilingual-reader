@@ -15,6 +15,33 @@ async function registerPreferencesPane(): Promise<void> {
   });
 }
 
+function installPreferencesBrand(win: Window): void {
+  const doc = win.document;
+  const root = doc.getElementById("bilingualreader-settings-root");
+  if (!root || doc.getElementById("bilingualreader-brand")) return;
+
+  const brand = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  ) as HTMLDivElement;
+  brand.id = "bilingualreader-brand";
+  brand.style.cssText =
+    "display:flex;justify-content:center;align-items:center;margin:4px 0 10px 0;";
+
+  const image = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "img",
+  ) as HTMLImageElement;
+  image.src = "icons/mahjong-red-dragon.svg";
+  image.alt = "Bilingual Reader";
+  image.width = 64;
+  image.height = 64;
+  image.style.cssText = "display:block;width:64px;height:64px;object-fit:contain;";
+
+  brand.appendChild(image);
+  root.prepend(brand);
+}
+
 async function onStartup() {
   await Promise.all([Zotero.initializationPromise, Zotero.unlockPromise, Zotero.uiReadyPromise]);
 
@@ -61,7 +88,9 @@ async function onNotify(
 
 async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   if (type === "load" && data.window) {
-    await registerPrefsScripts(data.window as Window);
+    const win = data.window as Window;
+    installPreferencesBrand(win);
+    await registerPrefsScripts(win);
   }
 }
 
