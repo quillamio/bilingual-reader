@@ -30,11 +30,7 @@ function getSDTDocument(reader: any): Document | null {
 function getSDTBrowsingContext(reader: any): any | null {
   try {
     const view = getActiveSDTView(reader);
-    return (
-      view?._iframe?.browsingContext ||
-      view?._iframe?.contentWindow?.browsingContext ||
-      null
-    );
+    return view?._iframe?.browsingContext || view?._iframe?.contentWindow?.browsingContext || null;
   } catch (_) {
     return null;
   }
@@ -118,15 +114,16 @@ function replaceToggleLabelWithIcon(doc: Document): void {
 }
 
 function removeReaderSettingsButton(doc: Document): void {
-  const settingsButton = doc.querySelector(`.${SETTINGS_BUTTON_CLASS}`);
-  settingsButton?.remove();
+  doc.querySelector(`.${SETTINGS_BUTTON_CLASS}`)?.remove();
 }
 
 function sanitizeFileName(value: string): string {
-  const cleaned = value
-    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim();
+  const chars = Array.from(value).map((character) => {
+    const code = character.charCodeAt(0);
+    if (code < 32 || "\\/:*?\"<>|".includes(character)) return "_";
+    return character;
+  });
+  const cleaned = chars.join("").replace(/\s+/g, " ").trim();
   return (cleaned || "中英对照翻译").slice(0, 120);
 }
 
@@ -191,14 +188,10 @@ async function waitForGeneratedFile(file: any): Promise<void> {
   throw new Error("PDF 已生成，但没有检测到有效的输出文件。");
 }
 
-async function importExportedPDF(
-  reader: any,
-  tempFile: any,
-  sourceAttachment: any,
-): Promise<any> {
+async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<any> {
   const parentItemID = Number(sourceAttachment?.parentItemID || 0);
   if (!parentItemID) {
-    throw new Error("当前 PDF 没有父级文献条目，无法作为条目附件保存。请先为该 PDF 创建父级条目。 ");
+    throw new Error("当前 PDF 没有父级文献条目，无法作为条目附件保存。请先为该 PDF 创建父级条目。");
   }
 
   const parentItem = Zotero.Items.get(parentItemID);
@@ -259,7 +252,9 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
 
   const parentItemID = Number((sourceAttachment as any).parentItemID || 0);
   const parentItem = parentItemID ? Zotero.Items.get(parentItemID) : null;
-  const parentTitle = String(parentItem?.getField?.("title") || sourceAttachment.getField?.("title") || "文献");
+  const parentTitle = String(
+    parentItem?.getField?.("title") || sourceAttachment.getField?.("title") || "文献",
+  );
   const fileName = sanitizeFileName(`${parentTitle} - 中英对照翻译.pdf`);
   const tempFile = Zotero.getTempDirectory();
   tempFile.append(`bilingual-reader-${Date.now()}-${fileName}`);
@@ -305,7 +300,7 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
 
     await browsingContext.print(settings);
     await waitForGeneratedFile(tempFile);
-    importedAttachment = await importExportedPDF(reader, tempFile, sourceAttachment);
+    importedAttachment = await importExportedPDF(tempFile, sourceAttachment);
   } catch (error: any) {
     Zotero.logError(error as Error);
     showMessage(reader, `导出中英对照 PDF 失败：${error?.message || String(error)}`);
