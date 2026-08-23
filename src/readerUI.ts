@@ -172,7 +172,9 @@ function installExportPrintStyle(doc: Document): HTMLStyleElement {
       }
     }
   `;
-  (doc.head || doc.documentElement).append(style);
+  const target = doc.head || doc.documentElement;
+  if (!target) throw new Error("无法准备中英对照 PDF 的打印样式。");
+  target.append(style);
   return style;
 }
 
