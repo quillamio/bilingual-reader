@@ -1,7 +1,7 @@
 {
   "name": "zotero-bilingual-reader",
   "type": "module",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Zotero 10 PDF reading mode bilingual paragraph translator",
   "config": {
     "addonName": "Bilingual Reader",
@@ -12,16 +12,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jokerhoneyyeah/bilingual-reader.git"
+    "url": "https://github.com/quillamio/bilingual-reader.git"
   },
-  "homepage": "https://github.com/jokerhoneyyeah/bilingual-reader",
-  "author": "jokerhoneyyeah",
+  "homepage": "https://github.com/quillamio/bilingual-reader",
+  "author": "quillamio",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "tsc --noEmit && zotero-plugin build",
-    "lint:check": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts src/cancellationToken.ts src/settings.ts src/translationCache.ts src/translationPipeline.ts src/modules/preferenceScript.ts",
-    "lint:fix": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts src/cancellationToken.ts src/settings.ts src/translationCache.ts src/translationPipeline.ts src/modules/preferenceScript.ts --fix",
+    "lint:check": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts src/readerUI.ts src/cancellationToken.ts src/settings.ts src/translationCache.ts src/translationPipeline.ts src/modules/preferenceScript.ts",
+    "lint:fix": "eslint src/index.ts src/addon.ts src/hooks.ts src/bilingualReader.ts src/readerUI.ts src/cancellationToken.ts src/settings.ts src/translationCache.ts src/translationPipeline.ts src/modules/preferenceScript.ts --fix",
     "test": "zotero-plugin test --no-watch",
     "test:unit": "node --test test/translationPipeline.node.test.mjs"
   },
