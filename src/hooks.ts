@@ -20,13 +20,19 @@ function installPreferencesBrand(win: Window): void {
   const root = doc.getElementById("bilingualreader-settings-root");
   if (!root || doc.getElementById("bilingualreader-brand")) return;
 
-  const brand = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+  const brand = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  ) as HTMLDivElement;
   brand.id = "bilingualreader-brand";
   brand.style.cssText =
     "display:flex;justify-content:center;align-items:center;margin:4px 0 10px 0;";
 
-  const image = doc.createElementNS("http://www.w3.org/1999/xhtml", "img");
-  image.src = `${String(addon.data.rootURI || "")}content/icons/mahjong-red-dragon.svg`;
+  const image = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "img",
+  ) as HTMLImageElement;
+  image.src = "icons/mahjong-red-dragon.svg";
   image.alt = "Bilingual Reader";
   image.width = 64;
   image.height = 64;
