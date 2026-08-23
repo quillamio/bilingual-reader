@@ -3,9 +3,8 @@ const TRANSLATION_CLASS = "bilingual-reader-translation";
 const TOGGLE_BUTTON_CLASS = "bilingual-reader-toolbar-button";
 const SETTINGS_BUTTON_CLASS = "bilingual-reader-settings-button";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
-const EXPORT_PRINT_STYLE_ID = "bilingual-reader-export-print-style";
-const MAHJONG_ICON = "chrome://bilingualreader/content/icons/mahjong-red-dragon.svg";
-const PRINTER_ICON = "chrome://bilingualreader/content/icons/printer.svg";
+const MAHJONG_EMOJI = "🀄";
+const PRINTER_EMOJI = "🖨️";
 
 function getInternalReader(reader: any): any {
   return reader?._internalReader || reader;
@@ -22,15 +21,6 @@ function getSDTDocument(reader: any): Document | null {
   try {
     const view = getActiveSDTView(reader);
     return view?._iframeDocument || view?._iframe?.contentDocument || null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function getSDTBrowsingContext(reader: any): any | null {
-  try {
-    const view = getActiveSDTView(reader);
-    return view?._iframe?.browsingContext || view?._iframe?.contentWindow?.browsingContext || null;
   } catch (_) {
     return null;
   }
@@ -58,10 +48,19 @@ function confirmMessage(reader: any, message: string): boolean {
   return win?.confirm ? Boolean(win.confirm(message)) : true;
 }
 
-function createToolbarImageButton(
+function applyEmojiButtonStyle(button: HTMLButtonElement): void {
+  button.style.minWidth = "34px";
+  button.style.paddingInline = "5px";
+  button.style.fontSize = "19px";
+  button.style.lineHeight = "1";
+  button.style.fontFamily =
+    '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+}
+
+function createToolbarEmojiButton(
   doc: Document,
   className: string,
-  iconURL: string,
+  emoji: string,
   title: string,
   onClick: (button: HTMLButtonElement) => void,
 ): HTMLButtonElement {
@@ -69,21 +68,10 @@ function createToolbarImageButton(
   button.className = `toolbar-button ${className}`;
   button.type = "button";
   button.tabIndex = -1;
+  button.textContent = emoji;
   button.title = title;
   button.setAttribute("aria-label", title);
-  button.style.minWidth = "34px";
-  button.style.paddingInline = "5px";
-
-  const image = doc.createElement("img");
-  image.src = iconURL;
-  image.alt = "";
-  image.draggable = false;
-  image.width = 20;
-  image.height = 20;
-  image.style.display = "block";
-  image.style.margin = "auto";
-  image.style.pointerEvents = "none";
-  button.append(image);
+  applyEmojiButtonStyle(button);
 
   button.addEventListener("click", (event: Event) => {
     event.preventDefault();
@@ -93,24 +81,16 @@ function createToolbarImageButton(
   return button;
 }
 
-function replaceToggleLabelWithIcon(doc: Document): void {
+function replaceToggleLabelWithEmoji(doc: Document): void {
   const button = doc.querySelector(`.${TOGGLE_BUTTON_CLASS}`) as HTMLButtonElement | null;
-  if (!button || button.dataset.bilingualReaderIcon === "mahjong") return;
+  if (!button || button.dataset.bilingualReaderIcon === "emoji") return;
 
-  const image = doc.createElement("img");
-  image.src = MAHJONG_ICON;
-  image.alt = "";
-  image.draggable = false;
-  image.width = 20;
-  image.height = 20;
-  image.style.display = "block";
-  image.style.margin = "auto";
-  image.style.pointerEvents = "none";
-
-  button.replaceChildren(image);
-  button.dataset.bilingualReaderIcon = "mahjong";
+  button.replaceChildren();
+  button.textContent = MAHJONG_EMOJI;
+  button.dataset.bilingualReaderIcon = "emoji";
   button.title = "开启/关闭中英段落对照";
   button.setAttribute("aria-label", "开启/关闭中英段落对照");
+  applyEmojiButtonStyle(button);
 }
 
 function removeReaderSettingsButton(doc: Document): void {
@@ -127,6 +107,15 @@ function sanitizeFileName(value: string): string {
   return (cleaned || "中英对照翻译").slice(0, 120);
 }
 
+function escapeHTML(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function getTranslationStats(doc: Document): { done: number; unfinished: number } {
   const blocks = Array.from(doc.querySelectorAll(`.${TRANSLATION_CLASS}`)) as HTMLElement[];
   let done = 0;
@@ -138,56 +127,118 @@ function getTranslationStats(doc: Document): { done: number; unfinished: number 
   return { done, unfinished };
 }
 
-function installExportPrintStyle(doc: Document): HTMLStyleElement {
-  doc.getElementById(EXPORT_PRINT_STYLE_ID)?.remove();
-  const style = doc.createElement("style");
-  style.id = EXPORT_PRINT_STYLE_ID;
-  style.textContent = `
-    @media print {
-      html, body {
-        background: #fff !important;
-        color: #111 !important;
-      }
-      body {
-        margin: 0 !important;
-        padding: 0 !important;
-      }
-      #sdt-content {
-        box-sizing: border-box !important;
-        width: auto !important;
-        max-width: none !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-      }
-      .${TRANSLATION_CLASS} {
-        color: #111 !important;
-        background: transparent !important;
-        border-left-color: #c7354a !important;
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-      a {
-        color: inherit !important;
-        text-decoration: none !important;
-      }
-    }
-  `;
-  const target = doc.head || doc.documentElement;
-  if (!target) throw new Error("无法准备中英对照 PDF 的打印样式。");
-  target.append(style);
-  return style;
+function buildExportHTML(doc: Document, title: string): string {
+  const sourceRoot = doc.querySelector("#sdt-content") as HTMLElement | null;
+  if (!sourceRoot) throw new Error("无法读取当前 Zotero 阅读模式正文。");
+
+  const root = sourceRoot.cloneNode(true) as HTMLElement;
+  const unfinishedBlocks = Array.from(
+    root.querySelectorAll(`.${TRANSLATION_CLASS}:not([data-state="done"])`),
+  ) as HTMLElement[];
+  for (const block of unfinishedBlocks) block.remove();
+
+  const removable = Array.from(
+    root.querySelectorAll("script, button, input, textarea, select"),
+  ) as HTMLElement[];
+  for (const element of removable) element.remove();
+
+  const baseURI = doc.baseURI || "about:blank";
+  const safeTitle = escapeHTML(title || "中英对照翻译");
+  const safeBaseURI = escapeHTML(baseURI);
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="${safeBaseURI}">
+<title>${safeTitle}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 16mm 17mm 17mm;
+  }
+  html, body {
+    background: #fff;
+    color: #111;
+  }
+  body {
+    margin: 0 auto;
+    max-width: 176mm;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
+      "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+  }
+  #sdt-content {
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  p, li, blockquote {
+    orphans: 3;
+    widows: 3;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid-page;
+    page-break-after: avoid;
+    line-height: 1.3;
+  }
+  figure, table, pre {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  img, svg, canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+  th, td {
+    border: 0.5pt solid #bbb;
+    padding: 3pt 4pt;
+    vertical-align: top;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .${TRANSLATION_CLASS} {
+    margin: 0.18em 0 0.7em !important;
+    padding: 0.12em 0 0.12em 0.78em !important;
+    border-left: 2.2pt solid #c7354a !important;
+    color: #222 !important;
+    background: transparent !important;
+    font-size: 10.2pt !important;
+    line-height: 1.58 !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  .${TRANSLATION_CLASS}[data-state="done"]::before {
+    content: "";
+  }
+</style>
+</head>
+<body>
+${root.outerHTML}
+</body>
+</html>`;
 }
 
 async function waitForGeneratedFile(file: any): Promise<void> {
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 300; i++) {
     try {
       if (file.exists() && file.fileSize > 0) return;
     } catch (_) {
       // The file may not exist until the print job finishes flushing.
     }
-    await Zotero.Promise.delay(50);
+    await Zotero.Promise.delay(100);
   }
-  throw new Error("PDF 已生成，但没有检测到有效的输出文件。");
+  throw new Error("PDF 打印任务已结束，但没有检测到有效的输出文件。");
 }
 
 async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<any> {
@@ -205,6 +256,74 @@ async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<
   attachment.setField("title", `${parentTitle || "文献"} - 中英对照翻译`);
   await attachment.saveTx();
   return attachment;
+}
+
+function getHiddenBrowserConstructor(): any {
+  const chromeUtils = (globalThis as any).ChromeUtils;
+  if (!chromeUtils?.importESModule) {
+    throw new Error("当前 Zotero 无法加载隐藏打印浏览器模块。");
+  }
+  const module = chromeUtils.importESModule("chrome://zotero/content/HiddenBrowser.mjs");
+  if (!module?.HiddenBrowser) {
+    throw new Error("当前 Zotero 未提供 HiddenBrowser 打印模块。");
+  }
+  return module.HiddenBrowser;
+}
+
+async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
+  const mainWindow = Zotero.getMainWindow() as any;
+  const printUtils = mainWindow?.PrintUtils;
+  if (!printUtils?.getPrintSettings) {
+    throw new Error("无法取得 Zotero 的 PDF 打印设置。");
+  }
+
+  const HiddenBrowser = getHiddenBrowserConstructor();
+  const browser = new HiddenBrowser({ useHiddenFrame: false });
+
+  try {
+    const loaded = await browser.load(
+      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+    );
+    if (!loaded) throw new Error("用于导出的中英对照页面加载失败。");
+
+    try {
+      await browser.waitForDocument({ allowInteractiveAfter: 1500 });
+    } catch (_) {
+      // The data document is usually ready after load(); continue to print if
+      // the readiness actor is unavailable in an older Zotero 10 build.
+    }
+
+    const browsingContext = browser.browsingContext;
+    if (!browsingContext?.print) {
+      throw new Error("Zotero 隐藏打印浏览器没有可用的 PDF 打印上下文。");
+    }
+
+    const settings = printUtils.getPrintSettings("", false);
+    settings.printToFile = true;
+    settings.outputDestination = 1;
+    settings.outputFormat = 2;
+    settings.toFileName = tempFile.path;
+    settings.printSilent = true;
+    settings.printInColor = true;
+    settings.printBGColors = true;
+    settings.printBGImages = true;
+    settings.shrinkToFit = true;
+    settings.headerStrLeft = "";
+    settings.headerStrCenter = "";
+    settings.headerStrRight = "";
+    settings.footerStrLeft = "";
+    settings.footerStrCenter = "";
+    settings.footerStrRight = "";
+
+    await browsingContext.print(settings);
+    await waitForGeneratedFile(tempFile);
+  } finally {
+    try {
+      browser.destroy();
+    } catch (_) {
+      // Best-effort cleanup only.
+    }
+  }
 }
 
 export async function exportBilingualPDF(reader: any): Promise<void> {
@@ -233,7 +352,7 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   if (
     !confirmMessage(
       reader,
-      "将把当前中英对照阅读结果导出为 PDF，并作为附件加入这篇文献的 Zotero 条目。\n\n继续导出？",
+      "将生成一个新的中英对照 PDF，并作为附件加入这篇文献的 Zotero 条目。\n\n继续导出？",
     )
   ) {
     return;
@@ -243,12 +362,6 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   const sourceAttachment = itemID ? Zotero.Items.get(itemID) : null;
   if (!sourceAttachment) {
     showMessage(reader, "无法取得当前 PDF 的 Zotero 附件条目。");
-    return;
-  }
-
-  const browsingContext = getSDTBrowsingContext(reader);
-  if (!browsingContext?.print) {
-    showMessage(reader, "当前 Zotero 10 阅读视图不支持直接生成 PDF，请更新 Zotero 后重试。");
     return;
   }
 
@@ -267,51 +380,16 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
     // A timestamped file should normally not exist.
   }
 
-  const unfinishedBlocks = Array.from(
-    doc.querySelectorAll(`.${TRANSLATION_CLASS}:not([data-state="done"])`),
-  ) as HTMLElement[];
-  const previousDisplays = unfinishedBlocks.map((block) => block.style.display);
-  for (const block of unfinishedBlocks) block.style.display = "none";
-
-  const printStyle = installExportPrintStyle(doc);
   let importedAttachment: any = null;
-
   try {
-    const mainWindow = Zotero.getMainWindow() as any;
-    const printUtils = mainWindow?.PrintUtils;
-    if (!printUtils?.getPrintSettings) {
-      throw new Error("无法取得 Zotero 的 PDF 打印设置。");
-    }
-
-    const settings = printUtils.getPrintSettings("", false);
-    // Firefox nsIPrintSettings: file destination = 1, PDF format = 2.
-    settings.outputDestination = 1;
-    settings.outputFormat = 2;
-    settings.toFileName = tempFile.path;
-    settings.printSilent = true;
-    settings.printInColor = true;
-    settings.printBGColors = true;
-    settings.printBGImages = true;
-    settings.shrinkToFit = true;
-    settings.headerStrLeft = "";
-    settings.headerStrCenter = "";
-    settings.headerStrRight = "";
-    settings.footerStrLeft = "";
-    settings.footerStrCenter = "";
-    settings.footerStrRight = "";
-
-    await browsingContext.print(settings);
-    await waitForGeneratedFile(tempFile);
+    const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`);
+    await printHTMLToPDF(html, tempFile);
     importedAttachment = await importExportedPDF(tempFile, sourceAttachment);
   } catch (error: any) {
     Zotero.logError(error as Error);
     showMessage(reader, `导出中英对照 PDF 失败：${error?.message || String(error)}`);
     return;
   } finally {
-    printStyle.remove();
-    unfinishedBlocks.forEach((block, index) => {
-      block.style.display = previousDisplays[index] || "";
-    });
     try {
       if (tempFile.exists()) tempFile.remove(false);
     } catch (_) {
@@ -329,14 +407,14 @@ function enhanceToolbar(event: any): void {
   if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
 
   removeReaderSettingsButton(doc);
-  replaceToggleLabelWithIcon(doc);
+  replaceToggleLabelWithEmoji(doc);
 
   if (!doc.querySelector(`.${EXPORT_BUTTON_CLASS}`)) {
     append(
-      createToolbarImageButton(
+      createToolbarEmojiButton(
         doc,
         EXPORT_BUTTON_CLASS,
-        PRINTER_ICON,
+        PRINTER_EMOJI,
         "将当前中英对照结果导出为 PDF 并添加到文献附件",
         (button) => {
           if (button.disabled) return;
@@ -349,11 +427,11 @@ function enhanceToolbar(event: any): void {
     );
   }
 
-  // Keep this second pass because the built-in Bilingual Reader toolbar handler
-  // and this UI enhancer are independent Reader listeners.
+  // The built-in Bilingual Reader toolbar handler and this UI enhancer are
+  // independent Reader listeners, so repeat after the current render turn.
   doc.defaultView?.setTimeout(() => {
     removeReaderSettingsButton(doc);
-    replaceToggleLabelWithIcon(doc);
+    replaceToggleLabelWithEmoji(doc);
   }, 0);
 }
 
