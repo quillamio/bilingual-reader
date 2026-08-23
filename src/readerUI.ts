@@ -299,7 +299,9 @@ async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
     }
 
     const settings = printUtils.getPrintSettings("", false);
-    settings.printToFile = true;
+    // nsIPrintSettings no longer exposes a `printToFile` property. Assigning
+    // that obsolete expando on an XPCOM WrappedNative throws on Zotero 10.
+    // outputDestination=1 is the supported way to select file output.
     settings.outputDestination = 1;
     settings.outputFormat = 2;
     settings.toFileName = tempFile.path;
