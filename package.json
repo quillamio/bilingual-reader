@@ -1,7 +1,7 @@
 {
   "name": "zotero-bilingual-reader",
   "type": "module",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Zotero 10 PDF reading mode bilingual paragraph translator",
   "config": {
     "addonName": "Bilingual Reader",
