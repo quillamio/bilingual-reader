@@ -8,6 +8,7 @@
 - PDF 导出改为使用 Zotero 自带 `HiddenBrowser({ useHiddenFrame: false })` 创建临时隐藏打印页面，再调用其真实 `browsingContext.print()` 生成 PDF。
 - 导出内容从当前 `#sdt-content` 克隆，自动移除失败、暂停、等待等未成功译文，并使用独立 A4 打印样式重新排版。
 - 生成后的 PDF 仍通过 `Zotero.Attachments.importFromFile()` 自动保存为当前文献的子附件。
+- v0.1.7 已通过 ESLint、Linux 构建、macOS 构建和 Zotero 插件测试。
 
 ## v0.1.6
 
