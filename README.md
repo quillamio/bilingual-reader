@@ -2,7 +2,7 @@
   <img src="addon/content/icons/mahjong-red-dragon.svg" width="96" alt="Bilingual Reader" />
 </p>
 
-# Zotero Bilingual Reader
+# Bilingual Reader
 
 **Zotero 10 阅读模式 PDF 段落中英对照翻译。**
 
