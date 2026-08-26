@@ -2,6 +2,7 @@ import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { registerBilingualReader, unregisterBilingualReader } from "./bilingualReader";
 import { registerReaderUI, unregisterReaderUI } from "./readerUI";
+import { registerWordWise, unregisterWordWise } from "./wordWise";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { migrateLegacyPreferences } from "./settings";
 import { flushTranslationCacheIndex } from "./translationCache";
@@ -50,6 +51,7 @@ async function onStartup() {
   await registerPreferencesPane();
   registerBilingualReader();
   registerReaderUI();
+  registerWordWise();
 
   await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 
@@ -67,6 +69,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  unregisterWordWise();
   unregisterReaderUI();
   unregisterBilingualReader();
   flushTranslationCacheIndex();
