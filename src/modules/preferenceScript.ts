@@ -8,6 +8,8 @@ import {
   DEFAULT_REQUEST_GAP_MS,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_SKIP_LAST_PAGES,
+  DEFAULT_WORDWISE_COLOR,
+  DEFAULT_WORDWISE_POSITION,
   getEngine,
   getMaxCharsPerRequest,
   getMaxBatchParagraphs,
@@ -19,6 +21,8 @@ import {
   getRequestGapMs,
   getRequestTimeoutMs,
   getSkipLastPages,
+  getWordWiseColor,
+  getWordWisePosition,
   setEngine,
   setMaxCharsPerRequest,
   setMaxBatchParagraphs,
@@ -30,7 +34,10 @@ import {
   setRequestGapMs,
   setRequestTimeoutMs,
   setSkipLastPages,
+  setWordWiseColor,
+  setWordWisePosition,
   type TranslationEngine,
+  type WordWisePosition,
 } from "../settings";
 import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
 
@@ -67,11 +74,21 @@ function saveSettings(doc: Document): void {
   const model =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
+  const wordWiseColor =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color")?.value ||
+    DEFAULT_WORDWISE_COLOR;
+  const wordWisePositionValue =
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-position")?.value ||
+    DEFAULT_WORDWISE_POSITION;
+  const wordWisePosition: WordWisePosition =
+    wordWisePositionValue === "under" ? "under" : "over";
 
   setEngine(engine);
   setPDFTranslateService(service);
   setOllamaURL(url);
   setOllamaModel(model);
+  setWordWiseColor(wordWiseColor);
+  setWordWisePosition(wordWisePosition);
   setSkipLastPages(
     readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
   );
@@ -90,7 +107,7 @@ function saveSettings(doc: Document): void {
     readNumberInput(doc, "bilingualreader-request-timeout", DEFAULT_REQUEST_TIMEOUT_MS),
   );
 
-  setStatus(doc, "设置已保存。返回正在阅读的 PDF 后点击 🔄 即可应用。 ");
+  setStatus(doc, "设置已保存。翻译参数回到 PDF 后点击 🔄 应用；生词提示参数下次点击 🎰 时应用。 ");
 }
 
 async function testOllama(doc: Document): Promise<void> {
@@ -220,6 +237,8 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   );
   const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
   const requestTimeout = getElement<HTMLInputElement>(doc, "bilingualreader-request-timeout");
+  const wordWiseColor = getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color");
+  const wordWisePosition = getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-position");
 
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
@@ -231,6 +250,8 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (maxBatchParagraphs) maxBatchParagraphs.value = String(getMaxBatchParagraphs());
   if (maxErrors) maxErrors.value = String(getMaxConsecutiveErrors());
   if (requestTimeout) requestTimeout.value = String(getRequestTimeoutMs());
+  if (wordWiseColor) wordWiseColor.value = getWordWiseColor();
+  if (wordWisePosition) wordWisePosition.value = getWordWisePosition();
 
   updateBackendVisibility(doc);
   populatePDFTranslateServices(doc);
@@ -247,6 +268,13 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
       setStatus(doc, "Translate for Zotero 服务已修改，保存后回到 PDF 点击 🔄 应用。 ");
     },
   );
+
+  wordWiseColor?.addEventListener("input", () => {
+    setStatus(doc, `生词提示颜色已选择 ${wordWiseColor.value}，保存后下次点击 🎰 应用。`);
+  });
+  wordWisePosition?.addEventListener("change", () => {
+    setStatus(doc, "生词释义位置已修改，保存后下次点击 🎰 应用。");
+  });
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
     saveSettings(doc);
