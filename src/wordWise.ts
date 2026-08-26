@@ -19,7 +19,7 @@ const MAX_HINT_TERMS = 48;
 const BATCH_SIZE = 8;
 
 const COMMON_WORDS = new Set(
-  `a about above after again against all almost along already also although always am among an and another any anybody anyone anything are around as at away back be became because become becomes been before began begin behind being below between both but by can cannot could did different do does doing done down during each either else enough especially even ever every everybody everyone everything few first for found from further get gets getting give given gives go goes going gone good got great had has have having he her here hers herself him himself his how however i if in into is it its itself just keep kept kind know known knows large last later least less let like likely little long made make makes many may maybe me mean means might more most much must my myself near need needed needs neither never new next no nobody none nor not nothing now of off often on once one only onto or other others our ours ourselves out over own perhaps quite rather really right said same say says second see seem seemed seems several she should since small so some somebody someone something still such take taken takes than that the their theirs them themselves then there therefore these they thing things think this those though through thus to together too toward under until up upon us use used using very want was way we well were what whatever when whenever where whether which while who whoever whom whose why will with within without would yet you your yours yourself yourselves able across actually addition added additional age ago allow allows already although always among amount another appear appears area areas around available based became become because before begin beginning better beyond body both bring brought build case cases change changed changes clear clearly close common compared complete completely consider considered considering contain contains continue continued could current currently day days decrease decreased define defined depending despite develop developed development due early either end enough especially establish established even event events ever every evidence example examples existing expect expected explain following found full generally give given greater group groups had happen happened having help here high higher however human important include included includes including increase increased individual individuals information instead interest involved itself keep known large largely later lead leading less level levels likely little long low lower made main major make many may mean measured might model models more most much must need never new next number numbers often order original other others overall part parts particularly patient patients people percent performed period point possible present previous primary probably provide provided provides rather related remain reported required research result results same second several show showed shown significant significantly similar since small so some specific study studies studied such suggest suggested support supported system systems take than therefore these thing those though three through time times together total toward two under use used useful value values various very well were where whether while within without year years according account affect affected association associated available baseline between clinical compared condition conditions control controls data difference differences disease diseases effect effects estimated evaluation evidence factors figure figures finding findings follow following function functions gene genes health identify identified important increase intervention method methods outcome outcomes participants population protein proteins risk risks sample samples score scores table tables treatment treatments variable variables`.split(/\s+/u),
+  `a about above after again against all almost along already also although always am among an and another any anybody anyone anything are around as at away back be became because become becomes been before began begin behind being below between both but by can cannot could did different do does doing done down during each either else enough especially even ever every everybody everyone everything few first for found from further get gets getting give given gives go goes going gone good got great had has have having he her here hers herself him himself his how however i if in into is it its itself just keep kept kind know known knows large last later least less let like likely little long made make makes many may maybe me mean means might more most much must my myself near need needed needs neither never new next no nobody none nor not nothing now of off often on once one only onto or other others our ours ourselves out over own perhaps quite rather really right said same say says second see seem seemed seems several she should since small so some somebody someone something still such take taken takes than that the their theirs them themselves then there therefore these they thing things think this those though through thus to together too toward under until up upon us use used using very want was way we well were what whatever when whenever where whether which while who whoever whom whose why will with within without would yet you your yours yourself yourselves able across actually addition added additional age ago allow allows amount appear appears area areas available based beginning better beyond body bring brought build case cases change changed changes clear clearly close common compared complete completely consider considered considering contain contains continue continued current currently day days decrease decreased define defined depending despite develop developed development due early end establish established event events evidence example examples existing expect expected explain following full generally greater group groups happen happened help high higher human important include included includes including increase increased individual individuals information instead interest involved largely lead leading low lower main major measured model models number numbers order original overall part parts particularly patient patients people percent performed period point possible present previous primary probably provide provided provides rather related remain reported required research result results show showed shown significant significantly similar specific study studies studied suggest suggested support supported system systems three time times total two useful value values various year years according account affect affected association associated baseline clinical condition conditions control controls data difference differences disease diseases effect effects estimated evaluation evidence factors figure figures finding findings function functions gene genes health identify identified intervention method methods outcome outcomes participants population protein proteins risk risks sample samples score scores table tables treatment treatments variable variables`.split(/\s+/u),
 );
 
 const TECHNICAL_SUFFIXES = [
@@ -29,7 +29,6 @@ const TECHNICAL_SUFFIXES = [
   "opathy",
   "emia",
   "osis",
-  "genic",
   "genic",
   "ase",
   "itis",
@@ -131,8 +130,11 @@ function candidateScore(word: string, count: number): number {
 }
 
 function collectTextNodes(root: HTMLElement): Text[] {
+  const doc = root.ownerDocument;
+  if (!doc) return [];
+
   const nodes: Text[] = [];
-  const walker = root.ownerDocument.createTreeWalker(root, 4, {
+  const walker = doc.createTreeWalker(root, 4, {
     acceptNode(node) {
       const text = node as Text;
       if (!text.nodeValue?.trim()) return 2;
@@ -184,8 +186,8 @@ function cleanGloss(word: string, value: string): string {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   result = result.replace(new RegExp(`^${escaped}\\s*[:：-]?\\s*`, "iu"), "").trim();
   result = result.split(/\r?\n/u)[0]?.trim() || "";
-  const firstMeaning = result.split(/[；;。]/u)[0]?.trim() || result;
-  result = firstMeaning.replace(/^['"“”‘’]+|['"“”‘’]+$/gu, "").trim();
+  result = result.split(/[；;。]/u)[0]?.trim() || result;
+  result = result.replace(/^['"“”‘’]+|['"“”‘’]+$/gu, "").trim();
   if (result.length > 18) result = `${result.slice(0, 18).trim()}…`;
   return result;
 }
@@ -237,6 +239,7 @@ async function translateWithOllama(payload: string): Promise<string> {
   if (!xhr || xhr.status < 200 || xhr.status >= 300) {
     throw new Error(`Ollama 生词释义请求失败：HTTP ${xhr?.status || "unknown"}`);
   }
+
   let response: any = xhr.response;
   if (typeof response === "string") {
     try {
@@ -334,7 +337,9 @@ function ensureWordWiseStyle(doc: Document): void {
     ruby.${WORDWISE_CLASS} rb {
       color: ${color} !important;
       font-weight: 600 !important;
-      text-decoration: underline dotted color-mix(in srgb, ${color} 65%, transparent);
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-decoration-color: ${color};
       text-underline-offset: 0.12em;
     }
     ruby.${WORDWISE_CLASS} rt {
@@ -349,11 +354,14 @@ function ensureWordWiseStyle(doc: Document): void {
 }
 
 function annotateTextNode(node: Text, glosses: Map<string, string>): number {
+  const doc = node.ownerDocument;
+  if (!doc) return 0;
+
   const text = node.nodeValue || "";
   const pattern = /\b[A-Za-z][A-Za-z'-]{5,}\b/gu;
   let lastIndex = 0;
   let annotations = 0;
-  const fragment = node.ownerDocument.createDocumentFragment();
+  const fragment = doc.createDocumentFragment();
 
   for (const match of text.matchAll(pattern)) {
     if (match.index === undefined) continue;
@@ -364,14 +372,14 @@ function annotateTextNode(node: Text, glosses: Map<string, string>): number {
 
     if (match.index > lastIndex) fragment.append(text.slice(lastIndex, match.index));
 
-    const ruby = node.ownerDocument.createElement("ruby");
+    const ruby = doc.createElement("ruby");
     ruby.className = WORDWISE_CLASS;
     ruby.dataset.original = raw;
     ruby.dataset.word = word;
 
-    const rb = node.ownerDocument.createElement("rb");
+    const rb = doc.createElement("rb");
     rb.textContent = raw;
-    const rt = node.ownerDocument.createElement("rt");
+    const rt = doc.createElement("rt");
     rt.textContent = gloss;
     ruby.append(rb, rt);
     fragment.append(ruby);
@@ -482,15 +490,12 @@ function renderWordWiseButton(event: any): void {
     if (button.disabled) return;
 
     button.disabled = true;
-    const originalText = button.textContent;
     button.textContent = "⏳";
     void toggleWordWiseHints(reader)
       .then((result) => {
-        if (result.enabled) {
-          button.title = `已显示 ${result.annotations} 处生词提示（${result.uniqueTerms} 个词）；再次点击隐藏`;
-        } else {
-          button.title = "生词提示：点击显示/隐藏英文难词的简短中文释义";
-        }
+        button.title = result.enabled
+          ? `已显示 ${result.annotations} 处生词提示（${result.uniqueTerms} 个词）；再次点击隐藏`
+          : "生词提示：点击显示/隐藏英文难词的简短中文释义";
         button.setAttribute("aria-label", button.title);
       })
       .catch((error: any) => {
@@ -498,7 +503,7 @@ function renderWordWiseButton(event: any): void {
         showMessage(reader, `生词提示失败：${error?.message || String(error)}`);
       })
       .finally(() => {
-        button.textContent = originalText || SLOT_EMOJI;
+        button.textContent = SLOT_EMOJI;
         button.disabled = false;
       });
   });
