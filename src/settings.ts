@@ -1,6 +1,7 @@
 const BASE = "extensions.zotero.bilingualreader";
 
 export type TranslationEngine = "pdftranslate" | "ollama";
+export type WordWisePosition = "over" | "under";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
@@ -11,6 +12,8 @@ export const DEFAULT_MAX_BATCH_PARAGRAPHS = 6;
 export const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 export const DEFAULT_SKIP_LAST_PAGES = 1;
+export const DEFAULT_WORDWISE_COLOR = "#7E57C2";
+export const DEFAULT_WORDWISE_POSITION: WordWisePosition = "over";
 
 const ENGINE_PREF = `${BASE}.engine`;
 const PDFTRANSLATE_SERVICE_PREF = `${BASE}.pdftranslate.service`;
@@ -23,6 +26,8 @@ const MAX_BATCH_PARAGRAPHS_PREF = `${BASE}.maxBatchParagraphs`;
 const MAX_ERRORS_PREF = `${BASE}.maxConsecutiveErrors`;
 const REQUEST_TIMEOUT_PREF = `${BASE}.requestTimeoutMs`;
 const SKIP_LAST_PAGES_PREF = `${BASE}.skipLastPages`;
+const WORDWISE_COLOR_PREF = `${BASE}.wordwise.color`;
+const WORDWISE_POSITION_PREF = `${BASE}.wordwise.position`;
 
 function getStringPref(key: string, fallback: string): string {
   const value = (Zotero.Prefs as any).get(key, true);
@@ -132,6 +137,29 @@ export function getSkipLastPages(): number {
 
 export function setSkipLastPages(value: number): void {
   setNumberPref(SKIP_LAST_PAGES_PREF, value, 0, 50);
+}
+
+export function getWordWiseColor(): string {
+  const value = getStringPref(WORDWISE_COLOR_PREF, DEFAULT_WORDWISE_COLOR);
+  return /^#[0-9a-f]{6}$/iu.test(value) ? value.toUpperCase() : DEFAULT_WORDWISE_COLOR;
+}
+
+export function setWordWiseColor(value: string): void {
+  const normalized = value.trim();
+  setStringPref(
+    WORDWISE_COLOR_PREF,
+    /^#[0-9a-f]{6}$/iu.test(normalized) ? normalized.toUpperCase() : DEFAULT_WORDWISE_COLOR,
+  );
+}
+
+export function getWordWisePosition(): WordWisePosition {
+  return getStringPref(WORDWISE_POSITION_PREF, DEFAULT_WORDWISE_POSITION) === "under"
+    ? "under"
+    : "over";
+}
+
+export function setWordWisePosition(value: WordWisePosition): void {
+  setStringPref(WORDWISE_POSITION_PREF, value === "under" ? "under" : "over");
 }
 
 export function getResolvedPDFTranslateService(): string {

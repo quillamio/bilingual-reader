@@ -47,6 +47,44 @@
   </html:p>
 </groupbox>
 
+<groupbox id="bilingualreader-wordwise-section">
+  <label><html:h3>🎰 生词提示（Word Wise）</html:h3></label>
+  <html:p style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px">
+    点击 PDF 阅读器顶部的 🎰，自动挑选较难英文词并显示简短中文释义。试用版每篇最多提示约
+    48 个高难度词，释义使用当前选定的 Translate for Zotero 或 Ollama 后端。
+  </html:p>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-color" style="min-width: 180px"
+      >生词提示颜色</html:label
+    >
+    <html:input
+      id="bilingualreader-wordwise-color"
+      type="color"
+      value="#7E57C2"
+      style="width: 64px; height: 34px; padding: 2px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px">默认紫色 #7E57C2。</html:span>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-position" style="min-width: 180px"
+      >中文释义位置</html:label
+    >
+    <html:select id="bilingualreader-wordwise-position" style="min-width: 180px; padding: 4px 8px">
+      <html:option value="over">英文上方</html:option>
+      <html:option value="under">英文下方</html:option>
+    </html:select>
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >使用类似 Kindle Word Wise 的上下标注方式。</html:span
+    >
+  </hbox>
+
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    再次点击 🎰 会移除当前生词提示。修改颜色或位置后，先保存设置，再重新点击 🎰。
+  </html:p>
+</groupbox>
+
 <groupbox id="bilingualreader-page-section">
   <label><html:h3>翻译范围</html:h3></label>
   <hbox align="center" style="margin-bottom: 8px">
