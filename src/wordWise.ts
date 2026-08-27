@@ -162,7 +162,8 @@ function isCommonOrInflection(word: string): boolean {
 function collectTextNodes(root: HTMLElement): Text[] {
   const nodes: Text[] = [];
 
-  const visit = (node: Node): void => {
+  const visit = (node: Node | null): void => {
+    if (!node) return;
     if (node.nodeType === 3) {
       const text = node as Text;
       if (text.nodeValue?.trim() && !shouldSkipElement(text.parentElement)) nodes.push(text);
@@ -171,7 +172,8 @@ function collectTextNodes(root: HTMLElement): Text[] {
     if (node.nodeType !== 1) return;
     const element = node as Element;
     if (element !== root && shouldSkipElement(element)) return;
-    for (const child of Array.from(node.childNodes)) visit(child);
+    const children = node.childNodes;
+    for (let index = 0; index < children.length; index++) visit(children.item(index));
   };
 
   visit(root);
