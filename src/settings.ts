@@ -2,6 +2,9 @@ const BASE = "extensions.zotero.bilingualreader";
 
 export type TranslationEngine = "pdftranslate" | "ollama";
 export type WordWisePosition = "over" | "under";
+export type WordWiseLevel = "cet6" | "kaoyan" | "toefl-ielts" | "gre";
+export type WordWiseDomain = "auto" | "general" | "medical" | "engineering" | "computer" | "social";
+export type WordWiseDensity = "few" | "standard" | "many" | "rich" | "all";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
@@ -14,6 +17,11 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 export const DEFAULT_SKIP_LAST_PAGES = 1;
 export const DEFAULT_WORDWISE_COLOR = "#7E57C2";
 export const DEFAULT_WORDWISE_POSITION: WordWisePosition = "over";
+export const DEFAULT_WORDWISE_LEVEL: WordWiseLevel = "cet6";
+export const DEFAULT_WORDWISE_DOMAIN: WordWiseDomain = "auto";
+export const DEFAULT_WORDWISE_DENSITY: WordWiseDensity = "standard";
+export const DEFAULT_WORDWISE_SHOW_ACADEMIC = true;
+export const DEFAULT_WORDWISE_SHOW_PROFESSIONAL = true;
 
 const ENGINE_PREF = `${BASE}.engine`;
 const PDFTRANSLATE_SERVICE_PREF = `${BASE}.pdftranslate.service`;
@@ -28,6 +36,11 @@ const REQUEST_TIMEOUT_PREF = `${BASE}.requestTimeoutMs`;
 const SKIP_LAST_PAGES_PREF = `${BASE}.skipLastPages`;
 const WORDWISE_COLOR_PREF = `${BASE}.wordwise.color`;
 const WORDWISE_POSITION_PREF = `${BASE}.wordwise.position`;
+const WORDWISE_LEVEL_PREF = `${BASE}.wordwise.level`;
+const WORDWISE_DOMAIN_PREF = `${BASE}.wordwise.domain`;
+const WORDWISE_DENSITY_PREF = `${BASE}.wordwise.density`;
+const WORDWISE_SHOW_ACADEMIC_PREF = `${BASE}.wordwise.showAcademic`;
+const WORDWISE_SHOW_PROFESSIONAL_PREF = `${BASE}.wordwise.showProfessional`;
 
 function getStringPref(key: string, fallback: string): string {
   const value = (Zotero.Prefs as any).get(key, true);
@@ -36,6 +49,15 @@ function getStringPref(key: string, fallback: string): string {
 
 function setStringPref(key: string, value: string): void {
   (Zotero.Prefs as any).set(key, value, true);
+}
+
+function getBooleanPref(key: string, fallback: boolean): boolean {
+  const value = (Zotero.Prefs as any).get(key, true);
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function setBooleanPref(key: string, value: boolean): void {
+  (Zotero.Prefs as any).set(key, Boolean(value), true);
 }
 
 function getNumberPref(key: string, fallback: number, min: number, max: number): number {
@@ -160,6 +182,60 @@ export function getWordWisePosition(): WordWisePosition {
 
 export function setWordWisePosition(value: WordWisePosition): void {
   setStringPref(WORDWISE_POSITION_PREF, value === "under" ? "under" : "over");
+}
+
+export function getWordWiseLevel(): WordWiseLevel {
+  const value = getStringPref(WORDWISE_LEVEL_PREF, DEFAULT_WORDWISE_LEVEL);
+  if (value === "kaoyan" || value === "toefl-ielts" || value === "gre") return value;
+  return "cet6";
+}
+
+export function setWordWiseLevel(value: WordWiseLevel): void {
+  setStringPref(WORDWISE_LEVEL_PREF, value);
+}
+
+export function getWordWiseDomain(): WordWiseDomain {
+  const value = getStringPref(WORDWISE_DOMAIN_PREF, DEFAULT_WORDWISE_DOMAIN);
+  if (
+    value === "general" ||
+    value === "medical" ||
+    value === "engineering" ||
+    value === "computer" ||
+    value === "social"
+  ) {
+    return value;
+  }
+  return "auto";
+}
+
+export function setWordWiseDomain(value: WordWiseDomain): void {
+  setStringPref(WORDWISE_DOMAIN_PREF, value);
+}
+
+export function getWordWiseDensity(): WordWiseDensity {
+  const value = getStringPref(WORDWISE_DENSITY_PREF, DEFAULT_WORDWISE_DENSITY);
+  if (value === "few" || value === "many" || value === "rich" || value === "all") return value;
+  return "standard";
+}
+
+export function setWordWiseDensity(value: WordWiseDensity): void {
+  setStringPref(WORDWISE_DENSITY_PREF, value);
+}
+
+export function getWordWiseShowAcademic(): boolean {
+  return getBooleanPref(WORDWISE_SHOW_ACADEMIC_PREF, DEFAULT_WORDWISE_SHOW_ACADEMIC);
+}
+
+export function setWordWiseShowAcademic(value: boolean): void {
+  setBooleanPref(WORDWISE_SHOW_ACADEMIC_PREF, value);
+}
+
+export function getWordWiseShowProfessional(): boolean {
+  return getBooleanPref(WORDWISE_SHOW_PROFESSIONAL_PREF, DEFAULT_WORDWISE_SHOW_PROFESSIONAL);
+}
+
+export function setWordWiseShowProfessional(value: boolean): void {
+  setBooleanPref(WORDWISE_SHOW_PROFESSIONAL_PREF, value);
 }
 
 export function getResolvedPDFTranslateService(): string {
