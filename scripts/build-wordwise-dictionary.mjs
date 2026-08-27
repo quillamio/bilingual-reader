@@ -234,10 +234,10 @@ parseCsv(csv, (row) => {
 
 const sorted = Object.fromEntries(Object.entries(dictionary).sort(([a], [b]) => a.localeCompare(b)));
 fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
-const source = `// Auto-generated from ECDICT during npm run build.\n// Source: ${SOURCE_URL}\n// Compact tuple: [Chinese gloss, exam level, domain, frequency rank]\n// exam: 0=untagged, 1=CET6, 2=Kaoyan, 3=TOEFL/IELTS, 4=GRE\n// domain: 0=general, 1=medicine/life science, 2=engineering, 3=computer, 4=social science\nexport type WordWiseDictionaryEntry = readonly [string, number, number, number];\nexport const WORDWISE_DICTIONARY: Readonly<Record<string, WordWiseDictionaryEntry>> = ${JSON.stringify(sorted)};\nexport const WORDWISE_DICTIONARY_SOURCE = "ECDICT";\n`;
+const source = `// Auto-generated from ECDICT during npm run build.\n// Source: ${SOURCE_URL}\n// Compact tuple: [Chinese gloss, exam level, domain, frequency rank]\n// exam: 0=untagged, 1=CET6, 2=Kaoyan, 3=TOEFL/IELTS, 4=GRE\n// domain: 0=general, 1=medicine/life science, 2=engineering, 3=computer, 4=social science\nexport type WordWiseDictionaryEntry = readonly [string, number, number, number];\nexport const WORDWISE_DICTIONARY = ${JSON.stringify(sorted)} as unknown as Readonly<Record<string, WordWiseDictionaryEntry>>;\nexport const WORDWISE_DICTIONARY_SOURCE = "ECDICT";\n`;
 fs.writeFileSync(OUTPUT, source, "utf8");
 
 console.log(
-  `[Word Wise] parsed ${rows.toLocaleString()} rows, kept ${Object.keys(sorted).length.toLocaleString()} unique entries (${kept.toLocaleString()} accepted rows)` ,
+  `[Word Wise] parsed ${rows.toLocaleString()} rows, kept ${Object.keys(sorted).length.toLocaleString()} unique entries (${kept.toLocaleString()} accepted rows)`,
 );
 console.log(`[Word Wise] generated ${(Buffer.byteLength(source) / 1024 / 1024).toFixed(2)} MiB TS dictionary`);
