@@ -107,6 +107,47 @@ function normalizeWordWiseDensity(value: string): WordWiseDensity {
   return "standard";
 }
 
+function persistWordWiseSettings(doc: Document): void {
+  const color =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color")?.value ||
+    DEFAULT_WORDWISE_COLOR;
+  const positionValue =
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-position")?.value ||
+    DEFAULT_WORDWISE_POSITION;
+  const position: WordWisePosition = positionValue === "under" ? "under" : "over";
+  const level = normalizeWordWiseLevel(
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-level")?.value ||
+      DEFAULT_WORDWISE_LEVEL,
+  );
+  const domain = normalizeWordWiseDomain(
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-domain")?.value ||
+      DEFAULT_WORDWISE_DOMAIN,
+  );
+  const density = normalizeWordWiseDensity(
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-density")?.value ||
+      DEFAULT_WORDWISE_DENSITY,
+  );
+  const academic =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-academic")?.checked ??
+    DEFAULT_WORDWISE_SHOW_ACADEMIC;
+  const professional =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-professional")?.checked ??
+    DEFAULT_WORDWISE_SHOW_PROFESSIONAL;
+
+  setWordWiseColor(color);
+  setWordWisePosition(position);
+  setWordWiseLevel(level);
+  setWordWiseDomain(domain);
+  setWordWiseDensity(density);
+  setWordWiseShowAcademic(academic);
+  setWordWiseShowProfessional(professional);
+}
+
+function autosaveWordWiseSettings(doc: Document): void {
+  persistWordWiseSettings(doc);
+  setStatus(doc, "生词提示设置已自动保存；关闭设置窗口不会丢失，下次点击 🎰 时应用。");
+}
+
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
@@ -117,44 +158,12 @@ function saveSettings(doc: Document): void {
   const model =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
-  const wordWiseColor =
-    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color")?.value ||
-    DEFAULT_WORDWISE_COLOR;
-  const wordWisePositionValue =
-    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-position")?.value ||
-    DEFAULT_WORDWISE_POSITION;
-  const wordWisePosition: WordWisePosition =
-    wordWisePositionValue === "under" ? "under" : "over";
-  const wordWiseLevel = normalizeWordWiseLevel(
-    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-level")?.value ||
-      DEFAULT_WORDWISE_LEVEL,
-  );
-  const wordWiseDomain = normalizeWordWiseDomain(
-    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-domain")?.value ||
-      DEFAULT_WORDWISE_DOMAIN,
-  );
-  const wordWiseDensity = normalizeWordWiseDensity(
-    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-density")?.value ||
-      DEFAULT_WORDWISE_DENSITY,
-  );
-  const wordWiseAcademic =
-    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-academic")?.checked ??
-    DEFAULT_WORDWISE_SHOW_ACADEMIC;
-  const wordWiseProfessional =
-    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-professional")?.checked ??
-    DEFAULT_WORDWISE_SHOW_PROFESSIONAL;
 
   setEngine(engine);
   setPDFTranslateService(service);
   setOllamaURL(url);
   setOllamaModel(model);
-  setWordWiseColor(wordWiseColor);
-  setWordWisePosition(wordWisePosition);
-  setWordWiseLevel(wordWiseLevel);
-  setWordWiseDomain(wordWiseDomain);
-  setWordWiseDensity(wordWiseDensity);
-  setWordWiseShowAcademic(wordWiseAcademic);
-  setWordWiseShowProfessional(wordWiseProfessional);
+  persistWordWiseSettings(doc);
   setSkipLastPages(
     readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
   );
@@ -296,19 +305,27 @@ function registerProjectLink(doc: Document): void {
   );
 }
 
-function registerWordWiseSettingMessages(doc: Document): void {
-  const ids = [
+function registerWordWiseAutosave(doc: Document): void {
+  const selectIDs = [
     "bilingualreader-wordwise-level",
     "bilingualreader-wordwise-domain",
     "bilingualreader-wordwise-density",
+    "bilingualreader-wordwise-position",
     "bilingualreader-wordwise-academic",
     "bilingualreader-wordwise-professional",
   ];
-  for (const id of ids) {
+  for (const id of selectIDs) {
     getElement<HTMLElement>(doc, id)?.addEventListener("change", () => {
-      setStatus(doc, "生词提示规则已修改，保存后下次点击 🎰 应用。");
+      autosaveWordWiseSettings(doc);
     });
   }
+
+  getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color")?.addEventListener(
+    "input",
+    () => {
+      autosaveWordWiseSettings(doc);
+    },
+  );
 }
 
 export async function registerPrefsScripts(window: Window): Promise<void> {
@@ -363,7 +380,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   populatePDFTranslateServices(doc);
   updateCacheStatus(doc);
   registerProjectLink(doc);
-  registerWordWiseSettingMessages(doc);
+  registerWordWiseAutosave(doc);
 
   engine?.addEventListener("change", () => {
     updateBackendVisibility(doc);
@@ -376,13 +393,6 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
       setStatus(doc, "Translate for Zotero 服务已修改，保存后回到 PDF 点击 🔄 应用。");
     },
   );
-
-  wordWiseColor?.addEventListener("input", () => {
-    setStatus(doc, `生词提示颜色已选择 ${wordWiseColor.value}，保存后下次点击 🎰 应用。`);
-  });
-  wordWisePosition?.addEventListener("change", () => {
-    setStatus(doc, "生词释义位置已修改，保存后下次点击 🎰 应用。");
-  });
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
     saveSettings(doc);
