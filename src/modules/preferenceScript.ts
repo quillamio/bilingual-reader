@@ -8,6 +8,13 @@ import {
   DEFAULT_REQUEST_GAP_MS,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_SKIP_LAST_PAGES,
+  DEFAULT_WORDWISE_COLOR,
+  DEFAULT_WORDWISE_DENSITY,
+  DEFAULT_WORDWISE_DOMAIN,
+  DEFAULT_WORDWISE_LEVEL,
+  DEFAULT_WORDWISE_POSITION,
+  DEFAULT_WORDWISE_SHOW_ACADEMIC,
+  DEFAULT_WORDWISE_SHOW_PROFESSIONAL,
   getEngine,
   getMaxCharsPerRequest,
   getMaxBatchParagraphs,
@@ -19,6 +26,13 @@ import {
   getRequestGapMs,
   getRequestTimeoutMs,
   getSkipLastPages,
+  getWordWiseColor,
+  getWordWiseDensity,
+  getWordWiseDomain,
+  getWordWiseLevel,
+  getWordWisePosition,
+  getWordWiseShowAcademic,
+  getWordWiseShowProfessional,
   setEngine,
   setMaxCharsPerRequest,
   setMaxBatchParagraphs,
@@ -30,9 +44,22 @@ import {
   setRequestGapMs,
   setRequestTimeoutMs,
   setSkipLastPages,
+  setWordWiseColor,
+  setWordWiseDensity,
+  setWordWiseDomain,
+  setWordWiseLevel,
+  setWordWisePosition,
+  setWordWiseShowAcademic,
+  setWordWiseShowProfessional,
   type TranslationEngine,
+  type WordWiseDensity,
+  type WordWiseDomain,
+  type WordWiseLevel,
+  type WordWisePosition,
 } from "../settings";
 import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
+
+const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
 
 function getElement<T extends HTMLElement>(doc: Document, id: string): T | null {
   return doc.getElementById(id) as T | null;
@@ -57,6 +84,70 @@ function readNumberInput(doc: Document, id: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function normalizeWordWiseLevel(value: string): WordWiseLevel {
+  if (value === "kaoyan" || value === "toefl-ielts" || value === "gre") return value;
+  return "cet6";
+}
+
+function normalizeWordWiseDomain(value: string): WordWiseDomain {
+  if (
+    value === "general" ||
+    value === "medical" ||
+    value === "engineering" ||
+    value === "computer" ||
+    value === "social"
+  ) {
+    return value;
+  }
+  return "auto";
+}
+
+function normalizeWordWiseDensity(value: string): WordWiseDensity {
+  if (value === "few" || value === "many" || value === "rich" || value === "all") return value;
+  return "standard";
+}
+
+function persistWordWiseSettings(doc: Document): void {
+  const color =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color")?.value ||
+    DEFAULT_WORDWISE_COLOR;
+  const positionValue =
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-position")?.value ||
+    DEFAULT_WORDWISE_POSITION;
+  const position: WordWisePosition = positionValue === "under" ? "under" : "over";
+  const level = normalizeWordWiseLevel(
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-level")?.value ||
+      DEFAULT_WORDWISE_LEVEL,
+  );
+  const domain = normalizeWordWiseDomain(
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-domain")?.value ||
+      DEFAULT_WORDWISE_DOMAIN,
+  );
+  const density = normalizeWordWiseDensity(
+    getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-density")?.value ||
+      DEFAULT_WORDWISE_DENSITY,
+  );
+  const academic =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-academic")?.checked ??
+    DEFAULT_WORDWISE_SHOW_ACADEMIC;
+  const professional =
+    getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-professional")?.checked ??
+    DEFAULT_WORDWISE_SHOW_PROFESSIONAL;
+
+  setWordWiseColor(color);
+  setWordWisePosition(position);
+  setWordWiseLevel(level);
+  setWordWiseDomain(domain);
+  setWordWiseDensity(density);
+  setWordWiseShowAcademic(academic);
+  setWordWiseShowProfessional(professional);
+}
+
+function autosaveWordWiseSettings(doc: Document): void {
+  persistWordWiseSettings(doc);
+  setStatus(doc, "生词提示设置已自动保存；关闭设置窗口不会丢失，下次点击 🎰 时应用。");
+}
+
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
@@ -72,6 +163,7 @@ function saveSettings(doc: Document): void {
   setPDFTranslateService(service);
   setOllamaURL(url);
   setOllamaModel(model);
+  persistWordWiseSettings(doc);
   setSkipLastPages(
     readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
   );
@@ -90,7 +182,7 @@ function saveSettings(doc: Document): void {
     readNumberInput(doc, "bilingualreader-request-timeout", DEFAULT_REQUEST_TIMEOUT_MS),
   );
 
-  setStatus(doc, "设置已保存。返回正在阅读的 PDF 后点击 🔄 即可应用。 ");
+  setStatus(doc, "设置已保存。翻译参数回到 PDF 后点击 🔄 应用；生词参数下次点击 🎰 时应用。");
 }
 
 async function testOllama(doc: Document): Promise<void> {
@@ -201,6 +293,41 @@ function populatePDFTranslateServices(doc: Document): void {
     : "已检测到 Translate for Zotero。默认推荐使用该后端。";
 }
 
+function registerProjectLink(doc: Document): void {
+  getElement<HTMLAnchorElement>(doc, "bilingualreader-github-link")?.addEventListener(
+    "click",
+    (event) => {
+      event.preventDefault();
+      const launcher = (Zotero as any).launchURL;
+      if (typeof launcher === "function") launcher(PROJECT_URL);
+      else doc.defaultView?.open(PROJECT_URL, "_blank");
+    },
+  );
+}
+
+function registerWordWiseAutosave(doc: Document): void {
+  const selectIDs = [
+    "bilingualreader-wordwise-level",
+    "bilingualreader-wordwise-domain",
+    "bilingualreader-wordwise-density",
+    "bilingualreader-wordwise-position",
+    "bilingualreader-wordwise-academic",
+    "bilingualreader-wordwise-professional",
+  ];
+  for (const id of selectIDs) {
+    getElement<HTMLElement>(doc, id)?.addEventListener("change", () => {
+      autosaveWordWiseSettings(doc);
+    });
+  }
+
+  getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color")?.addEventListener(
+    "input",
+    () => {
+      autosaveWordWiseSettings(doc);
+    },
+  );
+}
+
 export async function registerPrefsScripts(window: Window): Promise<void> {
   const doc = window.document;
   const root = getElement<HTMLElement>(doc, "bilingualreader-settings-root");
@@ -220,6 +347,16 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   );
   const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
   const requestTimeout = getElement<HTMLInputElement>(doc, "bilingualreader-request-timeout");
+  const wordWiseColor = getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-color");
+  const wordWisePosition = getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-position");
+  const wordWiseLevel = getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-level");
+  const wordWiseDomain = getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-domain");
+  const wordWiseDensity = getElement<HTMLSelectElement>(doc, "bilingualreader-wordwise-density");
+  const wordWiseAcademic = getElement<HTMLInputElement>(doc, "bilingualreader-wordwise-academic");
+  const wordWiseProfessional = getElement<HTMLInputElement>(
+    doc,
+    "bilingualreader-wordwise-professional",
+  );
 
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
@@ -231,10 +368,19 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (maxBatchParagraphs) maxBatchParagraphs.value = String(getMaxBatchParagraphs());
   if (maxErrors) maxErrors.value = String(getMaxConsecutiveErrors());
   if (requestTimeout) requestTimeout.value = String(getRequestTimeoutMs());
+  if (wordWiseColor) wordWiseColor.value = getWordWiseColor();
+  if (wordWisePosition) wordWisePosition.value = getWordWisePosition();
+  if (wordWiseLevel) wordWiseLevel.value = getWordWiseLevel();
+  if (wordWiseDomain) wordWiseDomain.value = getWordWiseDomain();
+  if (wordWiseDensity) wordWiseDensity.value = getWordWiseDensity();
+  if (wordWiseAcademic) wordWiseAcademic.checked = getWordWiseShowAcademic();
+  if (wordWiseProfessional) wordWiseProfessional.checked = getWordWiseShowProfessional();
 
   updateBackendVisibility(doc);
   populatePDFTranslateServices(doc);
   updateCacheStatus(doc);
+  registerProjectLink(doc);
+  registerWordWiseAutosave(doc);
 
   engine?.addEventListener("change", () => {
     updateBackendVisibility(doc);
@@ -244,7 +390,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service")?.addEventListener(
     "change",
     () => {
-      setStatus(doc, "Translate for Zotero 服务已修改，保存后回到 PDF 点击 🔄 应用。 ");
+      setStatus(doc, "Translate for Zotero 服务已修改，保存后回到 PDF 点击 🔄 应用。");
     },
   );
 

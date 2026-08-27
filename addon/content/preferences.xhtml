@@ -47,6 +47,104 @@
   </html:p>
 </groupbox>
 
+<groupbox id="bilingualreader-wordwise-section">
+  <label><html:h3>🎰 生词提示（Word Wise）</html:h3></label>
+  <html:p style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px">
+    点击 PDF 阅读器顶部的 🎰 显示生词中文释义。v0.2.0-beta.3 使用随插件打包的 ECDICT
+    精简本地词典优先查询，大部分词义无需联网即可立即显示；本地未收录的少量生僻词再使用当前翻译后端后台补充。
+  </html:p>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-level" style="min-width: 180px"
+      >已掌握词汇水平</html:label
+    >
+    <html:select id="bilingualreader-wordwise-level" style="min-width: 220px; padding: 4px 8px">
+      <html:option value="cet6">大学英语六级</html:option>
+      <html:option value="kaoyan">考研英语</html:option>
+      <html:option value="toefl-ielts">雅思 / 托福</html:option>
+      <html:option value="gre">GRE</html:option>
+    </html:select>
+    <html:span style="margin-left: 10px; max-width: 470px"
+      >已掌握层级及以下的普通词尽量不提示，专业术语可独立显示。</html:span
+    >
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-domain" style="min-width: 180px"
+      >专业领域</html:label
+    >
+    <html:select id="bilingualreader-wordwise-domain" style="min-width: 220px; padding: 4px 8px">
+      <html:option value="auto">自动识别</html:option>
+      <html:option value="general">通用</html:option>
+      <html:option value="medical">医学与生命科学</html:option>
+      <html:option value="engineering">工程技术</html:option>
+      <html:option value="computer">计算机</html:option>
+      <html:option value="social">人文社会科学</html:option>
+    </html:select>
+    <html:span style="margin-left: 10px; max-width: 470px"
+      >自动识别会根据正文中专业词的分布选择主要领域。</html:span
+    >
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-density" style="min-width: 180px"
+      >提示密度</html:label
+    >
+    <html:select id="bilingualreader-wordwise-density" style="min-width: 220px; padding: 4px 8px">
+      <html:option value="few">少量（约 15 个 / 1000 词）</html:option>
+      <html:option value="standard">标准（约 25 个 / 1000 词）</html:option>
+      <html:option value="many">较多（约 40 个 / 1000 词）</html:option>
+      <html:option value="rich">丰富（约 60 个 / 1000 词）</html:option>
+      <html:option value="all">尽可能全部</html:option>
+    </html:select>
+    <html:span style="margin-left: 10px; max-width: 470px"
+      >不再限制每篇 48 个。专业术语不占普通生词额度。</html:span
+    >
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <spacer width="180" />
+    <html:label style="display: flex; align-items: center; margin-right: 22px">
+      <html:input id="bilingualreader-wordwise-academic" type="checkbox" />
+      <html:span style="margin-left: 6px">显示学术词汇</html:span>
+    </html:label>
+    <html:label style="display: flex; align-items: center">
+      <html:input id="bilingualreader-wordwise-professional" type="checkbox" />
+      <html:span style="margin-left: 6px">显示专业术语（不占普通额度）</html:span>
+    </html:label>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-color" style="min-width: 180px"
+      >生词提示颜色</html:label
+    >
+    <html:input
+      id="bilingualreader-wordwise-color"
+      type="color"
+      value="#7E57C2"
+      style="width: 64px; height: 34px; padding: 2px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px">默认紫色 #7E57C2。</html:span>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-wordwise-position" style="min-width: 180px"
+      >中文释义位置</html:label
+    >
+    <html:select id="bilingualreader-wordwise-position" style="min-width: 180px; padding: 4px 8px">
+      <html:option value="over">英文上方</html:option>
+      <html:option value="under">英文下方</html:option>
+    </html:select>
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >使用类似 Kindle Word Wise 的上下标注方式。</html:span
+    >
+  </hbox>
+
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    再次点击 🎰 会移除当前生词提示。修改以上选项后先点击下方“保存设置”，再回到 PDF 重新点击 🎰。
+  </html:p>
+</groupbox>
+
 <groupbox id="bilingualreader-page-section">
   <label><html:h3>翻译范围</html:h3></label>
   <hbox align="center" style="margin-bottom: 8px">
@@ -233,5 +331,19 @@
   <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
     修改翻译后端、具体翻译服务或速度参数后，回到 PDF 阅读器点击
     🔄。插件会取消旧任务、清除旧错误结果，并按照当前设置重新调度未成功的段落。
+  </html:p>
+</groupbox>
+
+<groupbox id="bilingualreader-project-section">
+  <label><html:h3>项目</html:h3></label>
+  <html:p style="line-height: 1.7; margin: 0; max-width: 760px">
+    如果这个插件对你有帮助，欢迎在 GitHub 上
+    <html:a
+      id="bilingualreader-github-link"
+      href="https://github.com/quillamio/bilingual-reader"
+      target="_blank"
+      style="font-weight: 600"
+      >⭐ Star quillamio/bilingual-reader</html:a
+    >。
   </html:p>
 </groupbox>
