@@ -6,8 +6,20 @@ import {
   getRequestGapMs,
   getRequestTimeoutMs,
   getWordWiseColor,
+  getWordWiseDensity,
+  getWordWiseDomain,
+  getWordWiseLevel,
   getWordWisePosition,
+  getWordWiseShowAcademic,
+  getWordWiseShowProfessional,
+  type WordWiseDensity,
+  type WordWiseDomain,
+  type WordWiseLevel,
 } from "./settings";
+import {
+  WORDWISE_DICTIONARY,
+  type WordWiseDictionaryEntry,
+} from "./generated/wordWiseDictionary";
 import { buildBatchPayload, parseBatchResult, type BatchInput } from "./translationPipeline";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
@@ -15,32 +27,22 @@ const TOOLBAR_BUTTON_CLASS = "bilingual-reader-wordwise-button";
 const WORDWISE_CLASS = "bilingual-reader-wordwise";
 const STYLE_ID = "bilingual-reader-wordwise-style";
 const SLOT_EMOJI = "🎰";
-const MAX_HINT_TERMS = 48;
-const BATCH_SIZE = 8;
+const BATCH_SIZE = 12;
+const MAX_PROFESSIONAL_TERMS = 320;
+const MAX_FALLBACK_TERMS = 120;
 
-const COMMON_WORDS = new Set(
-  `a about above after again against all almost along already also although always am among an and another any anybody anyone anything are around as at away back be became because become becomes been before began begin behind being below between both but by can cannot could did different do does doing done down during each either else enough especially even ever every everybody everyone everything few first for found from further get gets getting give given gives go goes going gone good got great had has have having he her here hers herself him himself his how however i if in into is it its itself just keep kept kind know known knows large last later least less let like likely little long made make makes many may maybe me mean means might more most much must my myself near need needed needs neither never new next no nobody none nor not nothing now of off often on once one only onto or other others our ours ourselves out over own perhaps quite rather really right said same say says second see seem seemed seems several she should since small so some somebody someone something still such take taken takes than that the their theirs them themselves then there therefore these they thing things think this those though through thus to together too toward under until up upon us use used using very want was way we well were what whatever when whenever where whether which while who whoever whom whose why will with within without would yet you your yours yourself yourselves able across actually addition added additional age ago allow allows amount appear appears area areas available based beginning better beyond body bring brought build case cases change changed changes clear clearly close common compared complete completely consider considered considering contain contains continue continued current currently day days decrease decreased define defined depending despite develop developed development due early end establish established event events evidence example examples existing expect expected explain following full generally greater group groups happen happened help high higher human important include included includes including increase increased individual individuals information instead interest involved largely lead leading low lower main major measured model models number numbers order original overall part parts particularly patient patients people percent performed period point possible present previous primary probably provide provided provides rather related remain reported required research result results show showed shown significant significantly similar specific study studies studied suggest suggested support supported system systems three time times total two useful value values various year years according account affect affected association associated baseline clinical condition conditions control controls data difference differences disease diseases effect effects estimated evaluation evidence factors figure figures finding findings function functions gene genes health identify identified intervention method methods outcome outcomes participants population protein proteins risk risks sample samples score scores table tables treatment treatments variable variables`.split(/\s+/u),
+const STOP_WORDS = new Set(
+  `a about above after again against all almost along already also although always am among an and another any anybody anyone anything are around as at away back be became because become becomes been before began begin behind being below between both but by can cannot could did do does doing done down during each either else enough especially even ever every everybody everyone everything few first for from further get gets getting give given gives go goes going gone good got had has have having he her here hers herself him himself his how however i if in into is it its itself just keep kept know known knows last later least less let like likely little long made make makes many may maybe me mean means might more most much must my myself near need needed needs neither never new next no nobody none nor not nothing now of off often on once one only onto or other others our ours ourselves out over own perhaps quite rather really right said same say says second see seem seemed seems several she should since small so some somebody someone something still such take taken takes than that the their theirs them themselves then there therefore these they thing things think this those though through thus to together too toward under until up upon us use used using very want was way we well were what whatever when whenever where whether which while who whoever whom whose why will with within without would yet you your yours yourself yourselves`.split(
+    /\s+/u,
+  ),
 );
 
-const TECHNICAL_SUFFIXES = [
+const ACADEMIC_SUFFIXES = [
   "ation",
   "ition",
   "ology",
-  "opathy",
-  "emia",
-  "osis",
-  "genic",
-  "ase",
-  "itis",
-  "ectomy",
-  "phagy",
-  "philia",
-  "phobia",
   "metric",
   "metry",
-  "tropic",
-  "trophy",
-  "tion",
   "sion",
   "ment",
   "ence",
@@ -48,19 +50,57 @@ const TECHNICAL_SUFFIXES = [
   "ity",
   "ive",
   "ical",
-  "ous",
 ];
+
+const LEVEL_CODE: Record<WordWiseLevel, number> = {
+  cet6: 1,
+  kaoyan: 2,
+  "toefl-ielts": 3,
+  gre: 4,
+};
+
+const FREQUENCY_KNOWN_THRESHOLD: Record<number, number> = {
+  1: 10000,
+  2: 15000,
+  3: 22000,
+  4: 32000,
+};
+
+const DENSITY_PER_1000: Record<Exclude<WordWiseDensity, "all">, number> = {
+  few: 15,
+  standard: 25,
+  many: 40,
+  rich: 60,
+};
+
+const DOMAIN_CODE: Record<Exclude<WordWiseDomain, "auto">, number> = {
+  general: 0,
+  medical: 1,
+  engineering: 2,
+  computer: 3,
+  social: 4,
+};
 
 interface CandidateInfo {
   word: string;
   count: number;
   score: number;
+  entry?: WordWiseDictionaryEntry;
+  professional: boolean;
+  academic: boolean;
+}
+
+interface CandidateCollection {
+  candidates: CandidateInfo[];
+  totalWords: number;
+  inferredDomain: number;
 }
 
 export interface WordWiseToggleResult {
   enabled: boolean;
   annotations: number;
   uniqueTerms: number;
+  pendingTerms: number;
 }
 
 const glossCache = new Map<string, string>();
@@ -99,7 +139,7 @@ function normalizeWord(raw: string): string {
 }
 
 function isCommonOrInflection(word: string): boolean {
-  if (COMMON_WORDS.has(word)) return true;
+  if (STOP_WORDS.has(word)) return true;
 
   const stems = new Set<string>();
   if (word.endsWith("ies") && word.length > 5) stems.add(`${word.slice(0, -3)}y`);
@@ -115,61 +155,142 @@ function isCommonOrInflection(word: string): boolean {
     stems.add(`${word.slice(0, -3)}e`);
   }
   if (word.endsWith("ly") && word.length > 6) stems.add(word.slice(0, -2));
-  if (word.endsWith("er") && word.length > 6) stems.add(word.slice(0, -2));
-  if (word.endsWith("est") && word.length > 7) stems.add(word.slice(0, -3));
 
-  return Array.from(stems).some((stem) => COMMON_WORDS.has(stem));
-}
-
-function candidateScore(word: string, count: number): number {
-  let score = Math.min(12, word.length);
-  if (word.length >= 10) score += 3;
-  if (TECHNICAL_SUFFIXES.some((suffix) => word.endsWith(suffix))) score += 4;
-  if (count > 1) score += Math.min(4, count - 1);
-  return score;
+  return Array.from(stems).some((stem) => STOP_WORDS.has(stem));
 }
 
 function collectTextNodes(root: HTMLElement): Text[] {
-  const doc = root.ownerDocument;
-  if (!doc) return [];
-
   const nodes: Text[] = [];
-  const walker = doc.createTreeWalker(root, 4, {
-    acceptNode(node) {
-      const text = node as Text;
-      if (!text.nodeValue?.trim()) return 2;
-      if (shouldSkipElement(text.parentElement)) return 2;
-      return 1;
-    },
-  });
 
-  let current = walker.nextNode();
-  while (current) {
-    nodes.push(current as Text);
-    current = walker.nextNode();
-  }
+  const visit = (node: Node): void => {
+    if (node.nodeType === 3) {
+      const text = node as Text;
+      if (text.nodeValue?.trim() && !shouldSkipElement(text.parentElement)) nodes.push(text);
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const element = node as Element;
+    if (element !== root && shouldSkipElement(element)) return;
+    for (const child of Array.from(node.childNodes)) visit(child);
+  };
+
+  visit(root);
   return nodes;
 }
 
-function collectCandidates(nodes: Text[]): CandidateInfo[] {
+function isAcademicWord(word: string, entry?: WordWiseDictionaryEntry): boolean {
+  const rank = entry?.[3] || 0;
+  if (ACADEMIC_SUFFIXES.some((suffix) => word.endsWith(suffix)) && word.length >= 7) return true;
+  return Boolean(entry && entry[2] === 0 && rank >= 7000 && rank <= 60000 && word.length >= 7);
+}
+
+function inferDomain(counts: Map<number, number>): number {
+  let bestDomain = 0;
+  let bestCount = 0;
+  for (const [domain, count] of counts) {
+    if (!domain || count < bestCount) continue;
+    bestDomain = domain;
+    bestCount = count;
+  }
+  return bestCount >= 4 ? bestDomain : 0;
+}
+
+function baseDifficultyScore(
+  word: string,
+  count: number,
+  entry: WordWiseDictionaryEntry | undefined,
+  masteredLevel: number,
+): number {
+  let score = Math.min(18, word.length);
+  const examLevel = entry?.[1] || 0;
+  const rank = entry?.[3] || 0;
+  if (examLevel > masteredLevel) score += 22 + (examLevel - masteredLevel) * 9;
+  if (!examLevel && rank > 0) score += Math.min(30, Math.log10(rank + 1) * 7);
+  if (!rank && word.length >= 10) score += 12;
+  if (ACADEMIC_SUFFIXES.some((suffix) => word.endsWith(suffix))) score += 7;
+  score += Math.min(5, Math.max(0, count - 1));
+  return score;
+}
+
+function shouldShowGeneralWord(
+  word: string,
+  entry: WordWiseDictionaryEntry | undefined,
+  masteredLevel: number,
+  showAcademic: boolean,
+): boolean {
+  const examLevel = entry?.[1] || 0;
+  const rank = entry?.[3] || 0;
+
+  if (examLevel > 0) return examLevel > masteredLevel;
+  if (rank > 0) {
+    const threshold = FREQUENCY_KNOWN_THRESHOLD[masteredLevel] || 15000;
+    if (rank > threshold) return true;
+  }
+  if (showAcademic && isAcademicWord(word, entry)) return true;
+  return !entry && word.length >= 9 && ACADEMIC_SUFFIXES.some((suffix) => word.endsWith(suffix));
+}
+
+function collectCandidates(nodes: Text[]): CandidateCollection {
   const counts = new Map<string, number>();
-  const pattern = /\b[A-Za-z][A-Za-z'-]{5,}\b/gu;
+  const domainCounts = new Map<number, number>();
+  const allWordPattern = /\b[A-Za-z][A-Za-z'-]{2,}\b/gu;
+  let totalWords = 0;
 
   for (const node of nodes) {
     const text = node.nodeValue || "";
-    for (const match of text.matchAll(pattern)) {
+    for (const match of text.matchAll(allWordPattern)) {
       const raw = match[0];
-      if (raw.length > 30 || /^[A-Z]{2,}$/u.test(raw)) continue;
+      totalWords += 1;
+      if (raw.length > 30 || raw.length < 4 || /^[A-Z]{2,}$/u.test(raw)) continue;
       const word = normalizeWord(raw);
       if (!word || isCommonOrInflection(word)) continue;
       counts.set(word, (counts.get(word) || 0) + 1);
+      const domain = WORDWISE_DICTIONARY[word]?.[2] || 0;
+      if (domain) domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
     }
   }
 
-  return Array.from(counts.entries())
-    .map(([word, count]) => ({ word, count, score: candidateScore(word, count) }))
-    .sort((a, b) => b.score - a.score || b.count - a.count || a.word.localeCompare(b.word))
-    .slice(0, MAX_HINT_TERMS);
+  const masteredLevel = LEVEL_CODE[getWordWiseLevel()];
+  const selectedDomain = getWordWiseDomain();
+  const inferredDomain = inferDomain(domainCounts);
+  const showAcademic = getWordWiseShowAcademic();
+  const showProfessional = getWordWiseShowProfessional();
+  const explicitDomain = selectedDomain === "auto" ? inferredDomain : DOMAIN_CODE[selectedDomain];
+
+  const candidates: CandidateInfo[] = [];
+  for (const [word, count] of counts) {
+    const entry = WORDWISE_DICTIONARY[word];
+    const domain = entry?.[2] || 0;
+    const professional = Boolean(
+      showProfessional &&
+        domain > 0 &&
+        (selectedDomain === "auto" ? !inferredDomain || domain === inferredDomain : domain === explicitDomain),
+    );
+    const academic = showAcademic && isAcademicWord(word, entry);
+    if (!professional && !shouldShowGeneralWord(word, entry, masteredLevel, showAcademic)) continue;
+
+    let score = baseDifficultyScore(word, count, entry, masteredLevel);
+    if (professional) score += 120;
+    if (academic) score += 8;
+    if (selectedDomain === "auto" && inferredDomain && domain === inferredDomain) score += 12;
+    candidates.push({ word, count, score, entry, professional, academic });
+  }
+
+  candidates.sort((a, b) => b.score - a.score || b.count - a.count || a.word.localeCompare(b.word));
+  return { candidates, totalWords, inferredDomain };
+}
+
+function selectCandidates(collection: CandidateCollection): CandidateInfo[] {
+  const density = getWordWiseDensity();
+  const professional = collection.candidates.filter((candidate) => candidate.professional);
+  const general = collection.candidates.filter((candidate) => !candidate.professional);
+  const professionalSelection = professional.slice(0, MAX_PROFESSIONAL_TERMS);
+
+  if (density === "all") return [...professionalSelection, ...general];
+
+  const rate = DENSITY_PER_1000[density];
+  const target = Math.max(25, Math.ceil((Math.max(1, collection.totalWords) / 1000) * rate));
+  return [...professionalSelection, ...general.slice(0, target)];
 }
 
 function engineCachePrefix(): string {
@@ -186,8 +307,8 @@ function cleanGloss(word: string, value: string): string {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   result = result.replace(new RegExp(`^${escaped}\\s*[:：-]?\\s*`, "iu"), "").trim();
   result = result.split(/\r?\n/u)[0]?.trim() || "";
-  result = result.split(/[；;。]/u)[0]?.trim() || result;
-  result = result.replace(/^['"“”‘’]+|['"“”‘’]+$/gu, "").trim();
+  const firstMeaning = result.split(/[；;。]/u)[0]?.trim() || result;
+  result = firstMeaning.replace(/^['"“”‘’]+|['"“”‘’]+$/gu, "").trim();
   if (result.length > 18) result = `${result.slice(0, 18).trim()}…`;
   return result;
 }
@@ -195,7 +316,7 @@ function cleanGloss(word: string, value: string): string {
 async function translateWithPDFTranslate(payload: string, itemID: number): Promise<string> {
   const api = (Zotero as any).PDFTranslate?.api;
   if (!api?.translate) {
-    throw new Error("未检测到 Translate for Zotero，无法生成生词释义。");
+    throw new Error("未检测到 Translate for Zotero，无法补充本地词典未收录的生词释义。");
   }
 
   const options: Record<string, any> = {
@@ -239,7 +360,6 @@ async function translateWithOllama(payload: string): Promise<string> {
   if (!xhr || xhr.status < 200 || xhr.status >= 300) {
     throw new Error(`Ollama 生词释义请求失败：HTTP ${xhr?.status || "unknown"}`);
   }
-
   let response: any = xhr.response;
   if (typeof response === "string") {
     try {
@@ -358,7 +478,7 @@ function annotateTextNode(node: Text, glosses: Map<string, string>): number {
   if (!doc) return 0;
 
   const text = node.nodeValue || "";
-  const pattern = /\b[A-Za-z][A-Za-z'-]{5,}\b/gu;
+  const pattern = /\b[A-Za-z][A-Za-z'-]{2,}\b/gu;
   let lastIndex = 0;
   let annotations = 0;
   const fragment = doc.createDocumentFragment();
@@ -394,27 +514,55 @@ function annotateTextNode(node: Text, glosses: Map<string, string>): number {
   return annotations;
 }
 
+function annotateCurrentDocument(reader: any, glosses: Map<string, string>): number {
+  if (!glosses.size) return 0;
+  const doc = getSDTDocument(reader);
+  const root = doc?.querySelector("#sdt-content") as HTMLElement | null;
+  if (!doc || !root || root.dataset.wordWiseActive !== "true") return 0;
+
+  ensureWordWiseStyle(doc);
+  let annotations = 0;
+  for (const node of collectTextNodes(root)) {
+    if (!node.isConnected || shouldSkipElement(node.parentElement)) continue;
+    annotations += annotateTextNode(node, glosses);
+  }
+  return annotations;
+}
+
 export function removeWordWiseHints(reader: any): number {
   const doc = getSDTDocument(reader);
   if (!doc) return 0;
+  const root = doc.querySelector("#sdt-content") as HTMLElement | null;
+  if (root) root.dataset.wordWiseActive = "false";
   const hints = Array.from(doc.querySelectorAll(`ruby.${WORDWISE_CLASS}`)) as HTMLElement[];
   for (const hint of hints) {
     const original = hint.dataset.original || hint.querySelector("rb")?.textContent || "";
     hint.replaceWith(doc.createTextNode(original));
   }
   doc.getElementById(STYLE_ID)?.remove();
-  doc.querySelector("#sdt-content")?.normalize();
+  root?.normalize();
   return hints.length;
 }
 
 export function hasWordWiseHints(reader: any): boolean {
-  return Boolean(getSDTDocument(reader)?.querySelector(`ruby.${WORDWISE_CLASS}`));
+  const doc = getSDTDocument(reader);
+  const root = doc?.querySelector("#sdt-content") as HTMLElement | null;
+  return root?.dataset.wordWiseActive === "true" || Boolean(doc?.querySelector(`ruby.${WORDWISE_CLASS}`));
+}
+
+function localGlossesFor(candidates: CandidateInfo[]): Map<string, string> {
+  const glosses = new Map<string, string>();
+  for (const candidate of candidates) {
+    const gloss = candidate.entry?.[0]?.trim();
+    if (gloss) glosses.set(candidate.word, gloss);
+  }
+  return glosses;
 }
 
 export async function toggleWordWiseHints(reader: any): Promise<WordWiseToggleResult> {
   if (hasWordWiseHints(reader)) {
     const removed = removeWordWiseHints(reader);
-    return { enabled: false, annotations: removed, uniqueTerms: 0 };
+    return { enabled: false, annotations: removed, uniqueTerms: 0, pendingTerms: 0 };
   }
 
   const doc = getSDTDocument(reader);
@@ -427,27 +575,58 @@ export async function toggleWordWiseHints(reader: any): Promise<WordWiseToggleRe
   if (!itemID) throw new Error("无法取得当前 PDF 的 Zotero 条目编号。");
 
   const nodes = collectTextNodes(root);
-  const candidates = collectCandidates(nodes);
-  if (!candidates.length) {
-    throw new Error("当前页面没有识别到需要提示的英文生词。");
+  const collection = collectCandidates(nodes);
+  const selected = selectCandidates(collection);
+  if (!selected.length) {
+    throw new Error("当前文章没有识别到符合所选词汇水平和提示密度的生词。");
   }
 
-  const glosses = await resolveGlosses(
-    candidates.map((candidate) => candidate.word),
-    itemID,
-  );
-  if (!glosses.size) {
-    throw new Error("没有取得可用的生词释义，请检查当前翻译后端或翻译服务。");
-  }
-
+  root.dataset.wordWiseActive = "true";
   ensureWordWiseStyle(doc);
+
+  const localGlosses = localGlossesFor(selected);
   let annotations = 0;
   for (const node of nodes) {
     if (!node.isConnected || shouldSkipElement(node.parentElement)) continue;
-    annotations += annotateTextNode(node, glosses);
+    annotations += annotateTextNode(node, localGlosses);
   }
 
-  return { enabled: true, annotations, uniqueTerms: glosses.size };
+  const missing = selected
+    .filter((candidate) => !localGlosses.has(candidate.word))
+    .slice(0, MAX_FALLBACK_TERMS)
+    .map((candidate) => candidate.word);
+
+  if (!localGlosses.size && missing.length) {
+    const fallback = await resolveGlosses(missing, itemID);
+    annotations += annotateCurrentDocument(reader, fallback);
+    if (!fallback.size) {
+      root.dataset.wordWiseActive = "false";
+      throw new Error("本地词典未找到可用释义，翻译后端也没有返回生词释义。");
+    }
+    return {
+      enabled: true,
+      annotations,
+      uniqueTerms: fallback.size,
+      pendingTerms: 0,
+    };
+  }
+
+  if (missing.length) {
+    void resolveGlosses(missing, itemID)
+      .then((fallback) => {
+        annotateCurrentDocument(reader, fallback);
+      })
+      .catch((error) => {
+        Zotero.logError(error as Error);
+      });
+  }
+
+  return {
+    enabled: true,
+    annotations,
+    uniqueTerms: localGlosses.size,
+    pendingTerms: missing.length,
+  };
 }
 
 function showMessage(reader: any, message: string): void {
@@ -480,7 +659,7 @@ function renderWordWiseButton(event: any): void {
   button.type = "button";
   button.tabIndex = -1;
   button.textContent = SLOT_EMOJI;
-  button.title = "生词提示：点击显示/隐藏英文难词的简短中文释义";
+  button.title = "生词提示：按词汇水平、专业领域和提示密度显示/隐藏简短中文释义";
   button.setAttribute("aria-label", button.title);
   applyEmojiButtonStyle(button);
 
@@ -493,9 +672,13 @@ function renderWordWiseButton(event: any): void {
     button.textContent = "⏳";
     void toggleWordWiseHints(reader)
       .then((result) => {
-        button.title = result.enabled
-          ? `已显示 ${result.annotations} 处生词提示（${result.uniqueTerms} 个词）；再次点击隐藏`
-          : "生词提示：点击显示/隐藏英文难词的简短中文释义";
+        if (!result.enabled) {
+          button.title = "生词提示：按词汇水平、专业领域和提示密度显示/隐藏简短中文释义";
+        } else if (result.pendingTerms) {
+          button.title = `已立即显示 ${result.annotations} 处本地生词提示；另有 ${result.pendingTerms} 个生僻词正在后台补充`;
+        } else {
+          button.title = `已显示 ${result.annotations} 处生词提示（${result.uniqueTerms} 个词）；再次点击隐藏`;
+        }
         button.setAttribute("aria-label", button.title);
       })
       .catch((error: any) => {
