@@ -1,7 +1,6 @@
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
-import { registerBilingualReader, unregisterBilingualReader } from "./bilingualReader";
-import { registerReaderUI, unregisterReaderUI } from "./readerUI";
+import { registerReaderToolbar, unregisterReaderToolbar } from "./readerToolbar";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { migrateLegacyPreferences } from "./settings";
 import { flushTranslationCacheIndex } from "./translationCache";
@@ -20,18 +19,12 @@ function installPreferencesBrand(win: Window): void {
   const root = doc.getElementById("bilingualreader-settings-root");
   if (!root || doc.getElementById("bilingualreader-brand")) return;
 
-  const brand = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "div",
-  ) as HTMLDivElement;
+  const brand = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLDivElement;
   brand.id = "bilingualreader-brand";
   brand.style.cssText =
     "display:flex;justify-content:center;align-items:center;margin:4px 0 10px 0;";
 
-  const image = doc.createElementNS(
-    "http://www.w3.org/1999/xhtml",
-    "img",
-  ) as HTMLImageElement;
+  const image = doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
   image.src = `${rootURI}content/icons/mahjong-red-dragon.svg`;
   image.alt = "Bilingual Reader";
   image.width = 64;
@@ -48,8 +41,7 @@ async function onStartup() {
   migrateLegacyPreferences();
   initLocale();
   await registerPreferencesPane();
-  registerBilingualReader();
-  registerReaderUI();
+  registerReaderToolbar();
 
   await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 
@@ -67,8 +59,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
-  unregisterReaderUI();
-  unregisterBilingualReader();
+  unregisterReaderToolbar();
   flushTranslationCacheIndex();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();

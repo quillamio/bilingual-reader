@@ -34,6 +34,8 @@ import {
 } from "../settings";
 import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
 
+const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
+
 function getElement<T extends HTMLElement>(doc: Document, id: string): T | null {
   return doc.getElementById(id) as T | null;
 }
@@ -201,6 +203,18 @@ function populatePDFTranslateServices(doc: Document): void {
     : "已检测到 Translate for Zotero。默认推荐使用该后端。";
 }
 
+function registerProjectLink(doc: Document): void {
+  getElement<HTMLAnchorElement>(doc, "bilingualreader-github-link")?.addEventListener(
+    "click",
+    (event) => {
+      event.preventDefault();
+      const launcher = (Zotero as any).launchURL;
+      if (typeof launcher === "function") launcher(PROJECT_URL);
+      else doc.defaultView?.open(PROJECT_URL, "_blank");
+    },
+  );
+}
+
 export async function registerPrefsScripts(window: Window): Promise<void> {
   const doc = window.document;
   const root = getElement<HTMLElement>(doc, "bilingualreader-settings-root");
@@ -235,6 +249,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   updateBackendVisibility(doc);
   populatePDFTranslateServices(doc);
   updateCacheStatus(doc);
+  registerProjectLink(doc);
 
   engine?.addEventListener("change", () => {
     updateBackendVisibility(doc);

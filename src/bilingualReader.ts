@@ -37,9 +37,9 @@ const TARGET_LANG = "zh-CN";
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const TOOLBAR_BUTTON_CLASS = "bilingual-reader-toolbar-button";
 const REFRESH_BUTTON_CLASS = "bilingual-reader-refresh-button";
-const SETTINGS_BUTTON_CLASS = "bilingual-reader-settings-button";
 const STYLE_ID = "bilingual-reader-style";
 const PREFERENCES_PANE_ID = "bilingual-reader-preferences";
+const MAHJONG_EMOJI = "🀄";
 
 interface ReaderParagraph {
   refPath: string;
@@ -931,6 +931,9 @@ function createToolbarButton(
   button.setAttribute("aria-label", title);
   button.style.minWidth = "34px";
   button.style.paddingInline = "5px";
+  button.style.fontSize = "19px";
+  button.style.lineHeight = "1";
+  button.style.fontFamily = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
   button.addEventListener("click", (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -939,39 +942,36 @@ function createToolbarButton(
   return button;
 }
 
-function renderToolbar(event: any): void {
+export function renderBilingualToolbarButtons(event: any): void {
   const { reader, doc, append } = event || {};
   if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
-  if (doc.querySelector(`.${TOOLBAR_BUTTON_CLASS}`)) return;
 
-  append(
-    createToolbarButton(
-      doc,
-      TOOLBAR_BUTTON_CLASS,
-      "中英",
-      "开启/关闭中英段落对照",
-      () => void toggleBilingualReading(reader),
-    ),
-  );
+  if (!doc.querySelector(`.${TOOLBAR_BUTTON_CLASS}`)) {
+    append(
+      createToolbarButton(
+        doc,
+        TOOLBAR_BUTTON_CLASS,
+        MAHJONG_EMOJI,
+        "开启/关闭中英段落对照",
+        () => void toggleBilingualReading(reader),
+      ),
+    );
+  }
 
-  append(
-    createToolbarButton(
-      doc,
-      REFRESH_BUTTON_CLASS,
-      "🔄",
-      "取消当前任务、清除错误结果，并按当前设置重新翻译",
-      () => void refreshBilingualReading(reader),
-    ),
-  );
-
-  append(
-    createToolbarButton(doc, SETTINGS_BUTTON_CLASS, "⚙", "快速切换翻译后端", () =>
-      configureTranslation(reader),
-    ),
-  );
+  if (!doc.querySelector(`.${REFRESH_BUTTON_CLASS}`)) {
+    append(
+      createToolbarButton(
+        doc,
+        REFRESH_BUTTON_CLASS,
+        "🔄",
+        "取消当前任务、清除错误结果，并按当前设置重新翻译",
+        () => void refreshBilingualReading(reader),
+      ),
+    );
+  }
 }
 
-function cleanupReader(reader: any): void {
+export function cleanupBilingualReader(reader: any): void {
   cancelRun(reader);
 
   const sdtDoc = getSDTDocument(reader);
@@ -986,25 +986,10 @@ function cleanupReader(reader: any): void {
 
   const buttons = toolbarDoc
     ? (Array.from(
-        toolbarDoc.querySelectorAll(
-          `.${TOOLBAR_BUTTON_CLASS}, .${REFRESH_BUTTON_CLASS}, .${SETTINGS_BUTTON_CLASS}`,
-        ),
+        toolbarDoc.querySelectorAll(`.${TOOLBAR_BUTTON_CLASS}, .${REFRESH_BUTTON_CLASS}`),
       ) as HTMLElement[])
     : [];
   for (const button of buttons) {
     button.remove();
-  }
-}
-
-export function registerBilingualReader(): void {
-  Zotero.Reader.registerEventListener("renderToolbar", renderToolbar, PLUGIN_ID);
-}
-
-export function unregisterBilingualReader(): void {
-  Zotero.Reader.unregisterEventListener("renderToolbar", renderToolbar);
-
-  const readers = ((Zotero.Reader as any)._readers || []) as any[];
-  for (const reader of readers) {
-    cleanupReader(reader);
   }
 }

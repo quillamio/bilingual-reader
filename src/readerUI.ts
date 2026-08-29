@@ -1,9 +1,5 @@
-const PLUGIN_ID = "bilingual-reader@zotero.local";
 const TRANSLATION_CLASS = "bilingual-reader-translation";
-const TOGGLE_BUTTON_CLASS = "bilingual-reader-toolbar-button";
-const SETTINGS_BUTTON_CLASS = "bilingual-reader-settings-button";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
-const MAHJONG_EMOJI = "🀄";
 const PRINTER_EMOJI = "🖨️";
 
 function getInternalReader(reader: any): any {
@@ -53,8 +49,7 @@ function applyEmojiButtonStyle(button: HTMLButtonElement): void {
   button.style.paddingInline = "5px";
   button.style.fontSize = "19px";
   button.style.lineHeight = "1";
-  button.style.fontFamily =
-    '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  button.style.fontFamily = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
 }
 
 function createToolbarEmojiButton(
@@ -81,26 +76,10 @@ function createToolbarEmojiButton(
   return button;
 }
 
-function replaceToggleLabelWithEmoji(doc: Document): void {
-  const button = doc.querySelector(`.${TOGGLE_BUTTON_CLASS}`) as HTMLButtonElement | null;
-  if (!button || button.dataset.bilingualReaderIcon === "emoji") return;
-
-  button.replaceChildren();
-  button.textContent = MAHJONG_EMOJI;
-  button.dataset.bilingualReaderIcon = "emoji";
-  button.title = "开启/关闭中英段落对照";
-  button.setAttribute("aria-label", "开启/关闭中英段落对照");
-  applyEmojiButtonStyle(button);
-}
-
-function removeReaderSettingsButton(doc: Document): void {
-  doc.querySelector(`.${SETTINGS_BUTTON_CLASS}`)?.remove();
-}
-
 function sanitizeFileName(value: string): string {
   const chars = Array.from(value).map((character) => {
     const code = character.charCodeAt(0);
-    if (code < 32 || "\\/:*?\"<>|".includes(character)) return "_";
+    if (code < 32 || '\\/:*?"<>|'.includes(character)) return "_";
     return character;
   });
   const cleaned = chars.join("").replace(/\s+/g, " ").trim();
@@ -281,9 +260,7 @@ async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
   const browser = new HiddenBrowser({ useHiddenFrame: false });
 
   try {
-    const loaded = await browser.load(
-      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
-    );
+    const loaded = await browser.load(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     if (!loaded) throw new Error("用于导出的中英对照页面加载失败。");
 
     try {
@@ -404,12 +381,9 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   }
 }
 
-function enhanceToolbar(event: any): void {
+export function renderReaderExportButton(event: any): void {
   const { reader, doc, append } = event || {};
   if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
-
-  removeReaderSettingsButton(doc);
-  replaceToggleLabelWithEmoji(doc);
 
   if (!doc.querySelector(`.${EXPORT_BUTTON_CLASS}`)) {
     append(
@@ -428,16 +402,9 @@ function enhanceToolbar(event: any): void {
       ),
     );
   }
-
-  // The built-in Bilingual Reader toolbar handler and this UI enhancer are
-  // independent Reader listeners, so repeat after the current render turn.
-  doc.defaultView?.setTimeout(() => {
-    removeReaderSettingsButton(doc);
-    replaceToggleLabelWithEmoji(doc);
-  }, 0);
 }
 
-function cleanupToolbar(reader: any): void {
+export function cleanupReaderUI(reader: any): void {
   let doc: Document | null = null;
   try {
     doc = reader?._iframeWindow?.document || null;
@@ -445,14 +412,4 @@ function cleanupToolbar(reader: any): void {
     doc = null;
   }
   doc?.querySelector(`.${EXPORT_BUTTON_CLASS}`)?.remove();
-}
-
-export function registerReaderUI(): void {
-  Zotero.Reader.registerEventListener("renderToolbar", enhanceToolbar, PLUGIN_ID);
-}
-
-export function unregisterReaderUI(): void {
-  Zotero.Reader.unregisterEventListener("renderToolbar", enhanceToolbar);
-  const readers = ((Zotero.Reader as any)._readers || []) as any[];
-  for (const reader of readers) cleanupToolbar(reader);
 }

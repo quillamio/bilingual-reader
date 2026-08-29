@@ -1,6 +1,7 @@
 import { assert } from "chai";
 import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
+import { renderReaderToolbar } from "../src/readerToolbar";
 import { clearTranslationCache } from "../src/translationCache";
 
 describe("startup", function () {
@@ -30,12 +31,12 @@ describe("startup", function () {
       }
 
       assert.exists(win?.document.getElementById("bilingualreader-engine"));
-      const engine = win?.document.getElementById("bilingualreader-engine") as
-        | HTMLSelectElement
-        | null;
-      const skipLastPages = win?.document.getElementById("bilingualreader-skip-last-pages") as
-        | HTMLInputElement
-        | null;
+      const engine = win?.document.getElementById(
+        "bilingualreader-engine",
+      ) as HTMLSelectElement | null;
+      const skipLastPages = win?.document.getElementById(
+        "bilingualreader-skip-last-pages",
+      ) as HTMLInputElement | null;
 
       assert.deepEqual(
         Array.from(engine?.options || []).map((option) => option.value),
@@ -44,9 +45,31 @@ describe("startup", function () {
       assert.equal(engine?.value, "pdftranslate");
       assert.equal(skipLastPages?.value, "1");
       assert.exists(win?.document.getElementById("bilingualreader-save"));
+      assert.equal(
+        (win?.document.getElementById("bilingualreader-github-link") as HTMLAnchorElement | null)
+          ?.href,
+        "https://github.com/quillamio/bilingual-reader",
+      );
     } finally {
       win?.close();
     }
+  });
+
+  it("should render every reader toolbar icon once without post-render DOM rewrites", function () {
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("toolbar-test");
+    const reader = { type: "pdf", itemID: 2147483644 };
+    const append = (...elements: HTMLElement[]) => doc.body.append(...elements);
+
+    renderReaderToolbar({ reader, doc, append });
+    renderReaderToolbar({ reader, doc, append });
+
+    assert.equal(doc.querySelectorAll(".bilingual-reader-toolbar-button").length, 1);
+    assert.equal(doc.querySelectorAll(".bilingual-reader-refresh-button").length, 1);
+    assert.equal(doc.querySelectorAll(".bilingual-reader-export-button").length, 1);
+    assert.equal(doc.querySelector(".bilingual-reader-toolbar-button")?.textContent, "🀄");
+    assert.equal(doc.querySelector(".bilingual-reader-export-button")?.textContent, "🖨️");
+    assert.notExists(doc.querySelector(".bilingual-reader-settings-button"));
+    assert.notExists(doc.querySelector(".bilingual-reader-wordwise-button"));
   });
 
   it("should save the engine and trailing-page settings from Zotero preferences", async function () {
@@ -226,10 +249,7 @@ describe("startup", function () {
 
     const structure = {
       catalog: {
-        pages: [
-          { contentRange: [[0], [1]] },
-          { contentRange: [[1], [2]] },
-        ],
+        pages: [{ contentRange: [[0], [1]] }, { contentRange: [[1], [2]] }],
       },
     };
     const reader = {
