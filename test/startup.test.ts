@@ -44,6 +44,18 @@ describe("startup", function () {
       );
       assert.equal(engine?.value, "pdftranslate");
       assert.equal(skipLastPages?.value, "1");
+      assert.equal(
+        win?.document
+          .getElementById("bilingualreader-introduction")
+          ?.textContent?.replace(/\s+/gu, " ")
+          .trim(),
+        "在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for Zotero（推荐使用必应）；Ollama 作为可选后端保留。",
+      );
+      assert.notExists(win?.document.getElementById("bilingualreader-pdftranslate-service"));
+      assert.include(
+        win?.document.getElementById("bilingualreader-pdftranslate-policy")?.textContent || "",
+        "固定跟随 Translate for Zotero 当前默认服务",
+      );
       assert.exists(win?.document.getElementById("bilingualreader-save"));
       assert.equal(
         (win?.document.getElementById("bilingualreader-github-link") as HTMLAnchorElement | null)
@@ -112,9 +124,12 @@ describe("startup", function () {
   it("should translate through Translate for Zotero without AbortController", async function () {
     this.timeout(10000);
     const prefKey = "extensions.zotero.bilingualreader.engine";
+    const obsoleteServicePref = "extensions.zotero.bilingualreader.pdftranslate.service";
     const previousEngine = Zotero.Prefs.get(prefKey, true);
+    const previousObsoleteService = Zotero.Prefs.get(obsoleteServicePref, true);
     const previousPDFTranslate = (Zotero as any).PDFTranslate;
     let shownError = "";
+    let requestedOptions: Record<string, any> | undefined;
 
     const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("reader-test");
     const content = doc.createElement("div");
@@ -143,13 +158,19 @@ describe("startup", function () {
 
     try {
       Zotero.Prefs.set(prefKey, "pdftranslate", true);
+      // A service saved by an older Bilingual Reader must no longer override
+      // Translate for Zotero's current default.
+      Zotero.Prefs.set(obsoleteServicePref, "legacy-service", true);
       (Zotero as any).PDFTranslate = {
         api: {
-          translate: async () => ({
-            status: "success",
-            result: "集成测试译文。",
-            service: "integration-test",
-          }),
+          translate: async (_text: string, options: Record<string, any>) => {
+            requestedOptions = options;
+            return {
+              status: "success",
+              result: "集成测试译文。",
+              service: "integration-test",
+            };
+          },
         },
       };
 
@@ -159,6 +180,7 @@ describe("startup", function () {
       assert.equal(shownError, "");
       assert.equal(translated?.textContent, "集成测试译文。");
       assert.equal(translated?.getAttribute("data-state"), "done");
+      assert.notProperty(requestedOptions, "service");
     } finally {
       await toggleBilingualReading(reader);
       clearTranslationCache();
@@ -167,6 +189,11 @@ describe("startup", function () {
         Zotero.Prefs.clear(prefKey, true);
       } else {
         Zotero.Prefs.set(prefKey, previousEngine, true);
+      }
+      if (previousObsoleteService === undefined) {
+        Zotero.Prefs.clear(obsoleteServicePref, true);
+      } else {
+        Zotero.Prefs.set(obsoleteServicePref, previousObsoleteService, true);
       }
     }
   });

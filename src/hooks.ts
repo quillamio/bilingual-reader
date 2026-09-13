@@ -4,6 +4,7 @@ import { registerReaderToolbar, unregisterReaderToolbar } from "./readerToolbar"
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { migrateLegacyPreferences } from "./settings";
 import { flushTranslationCacheIndex } from "./translationCache";
+import { cleanupAllReadingLayouts } from "./readingLayout";
 
 async function registerPreferencesPane(): Promise<void> {
   await Zotero.PreferencePanes.register({
@@ -36,16 +37,27 @@ function installPreferencesBrand(win: Window): void {
 }
 
 async function onStartup() {
-  await Promise.all([Zotero.initializationPromise, Zotero.unlockPromise, Zotero.uiReadyPromise]);
+  await Promise.all([Zotero.initializationPromise, Zotero.unlockPromise]);
+  if (!addon.data.alive) return;
 
-  migrateLegacyPreferences();
-  initLocale();
-  await registerPreferencesPane();
+  // Listen before session restoration mounts reader toolbars. Already-mounted
+  // readers are handled by registerReaderToolbar's reconciliation pass.
   registerReaderToolbar();
+  await Zotero.uiReadyPromise;
+  if (!addon.data.alive) return;
+
+  for (const initialize of [migrateLegacyPreferences, initLocale, registerPreferencesPane]) {
+    if (!addon.data.alive) return;
+    try {
+      await initialize();
+    } catch (error) {
+      Zotero.logError(error as Error);
+    }
+  }
 
   await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 
-  addon.data.initialized = true;
+  if (addon.data.alive) addon.data.initialized = true;
 }
 
 async function onMainWindowLoad(_win: _ZoteroTypes.MainWindow): Promise<void> {
@@ -60,6 +72,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 
 function onShutdown(): void {
   unregisterReaderToolbar();
+  cleanupAllReadingLayouts();
   flushTranslationCacheIndex();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
