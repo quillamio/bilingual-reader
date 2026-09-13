@@ -9,6 +9,7 @@ import {
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
+  getPDFTranslateService,
   getRequestGapMs,
   getRequestTimeoutMs,
   getSkipLastPages,
@@ -30,7 +31,6 @@ import {
   type BatchInput,
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
-import { cleanupReadingLayout, observeReadingLayout } from "./readingLayout";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
 const TARGET_LANG = "zh-CN";
@@ -164,6 +164,11 @@ async function translateWithPDFTranslate(
     itemID,
     langto: TARGET_LANG,
   };
+  const selectedService = getPDFTranslateService();
+  if (selectedService) {
+    options.service = selectedService;
+  }
+
   const task = await pdfTranslate.api.translate(text, options);
   const result = String(task?.result || "").trim();
 
@@ -173,7 +178,7 @@ async function translateWithPDFTranslate(
   if (!result || isFailureText(result)) {
     throw new Error(result || "Translate for Zotero 未返回译文，请检查翻译服务配置或网络状态。");
   }
-  const actualService = String(task?.service || "").trim();
+  const actualService = String(task?.service || selectedService || "").trim();
   return { text: result, engineTag: getCacheEngineTag(actualService) };
 }
 
@@ -566,7 +571,6 @@ function clearTranslations(doc: Document): void {
 
   const root = getDocumentRoot(doc);
   if (root) delete root.dataset.bilingualReaderRunning;
-  cleanupReadingLayout(doc);
 }
 
 function showError(reader: any, message: string): void {
@@ -801,7 +805,6 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
     throw new Error("当前阅读模式中没有检测到可翻译的正文段落，或已被末尾页数设置全部排除。");
   }
 
-  observeReadingLayout(getActiveSDTView(reader), doc);
   for (const paragraph of paragraphs) {
     ensureTranslationBlock(doc, paragraph);
   }
@@ -907,7 +910,9 @@ export function configureTranslation(reader: any): void {
   }
 
   setEngine("pdftranslate");
-  win.alert?.("已切换为 Translate for Zotero，并跟随其当前默认服务。点击 🔄 即可重试。");
+  win.alert?.(
+    "已切换为 Translate for Zotero。可在 Zotero 设置 → 中英对照 中指定具体服务，然后点击 🔄 重试。",
+  );
 }
 
 function createToolbarButton(
@@ -969,15 +974,8 @@ export function renderBilingualToolbarButtons(event: any): void {
 export function cleanupBilingualReader(reader: any): void {
   cancelRun(reader);
 
-  const internal = getInternalReader(reader);
-  for (const view of [internal?._primarySDTView, internal?._secondarySDTView]) {
-    try {
-      const doc = view?._iframeDocument || view?._iframe?.contentDocument;
-      if (doc) clearTranslations(doc);
-    } catch (_) {
-      // A split view's iframe may already have been destroyed.
-    }
-  }
+  const sdtDoc = getSDTDocument(reader);
+  if (sdtDoc) clearTranslations(sdtDoc);
 
   let toolbarDoc: Document | undefined;
   try {

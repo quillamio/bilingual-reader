@@ -7,12 +7,9 @@
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
 >
   <label><html:h2>中英对照阅读</html:h2></label>
-  <html:p
-    id="bilingualreader-introduction"
-    style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px"
-  >
+  <html:p style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px">
     在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for
-    Zotero（推荐使用必应）；Ollama 作为可选后端保留。
+    Zotero；Ollama 作为可选后端保留。
   </html:p>
 
   <hbox align="center" style="margin-bottom: 10px">
@@ -31,12 +28,22 @@
     style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px"
   ></html:p>
 
-  <html:p
-    id="bilingualreader-pdftranslate-policy"
-    style="line-height: 1.6; margin: 0; max-width: 760px"
-  >
-    固定跟随 Translate for Zotero 当前默认服务。请在 Translate for Zotero 中切换服务或配置密钥。
-    Bilingual Reader 只负责分段、调度、缓存和双语排版。
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-pdftranslate-service" style="min-width: 130px"
+      >翻译服务</html:label
+    >
+    <html:select
+      id="bilingualreader-pdftranslate-service"
+      style="min-width: 380px; max-width: 560px; padding: 4px 8px"
+    >
+      <html:option value="">跟随 Translate for Zotero 当前默认服务</html:option>
+    </html:select>
+  </hbox>
+
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    推荐优先使用这里的 Translate for Zotero。Bilingual Reader
+    只负责分段、调度、缓存和双语排版；翻译服务本身的密钥、额度及其他参数仍由 Translate for Zotero
+    管理。
   </html:p>
 </groupbox>
 
@@ -224,7 +231,7 @@
 <groupbox>
   <label><html:h3>刷新说明</html:h3></label>
   <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
-    修改翻译后端或速度参数后，回到 PDF 阅读器点击
+    修改翻译后端、具体翻译服务或速度参数后，回到 PDF 阅读器点击
     🔄。插件会取消旧任务、清除旧错误结果，并按照当前设置重新调度未成功的段落。
   </html:p>
 </groupbox>

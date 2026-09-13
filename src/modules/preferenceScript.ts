@@ -15,6 +15,7 @@ import {
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
+  getPDFTranslateService,
   getRequestGapMs,
   getRequestTimeoutMs,
   getSkipLastPages,
@@ -25,6 +26,7 @@ import {
   setMaxConsecutiveErrors,
   setOllamaModel,
   setOllamaURL,
+  setPDFTranslateService,
   setRequestGapMs,
   setRequestTimeoutMs,
   setSkipLastPages,
@@ -60,6 +62,8 @@ function readNumberInput(doc: Document, id: string, fallback: number): number {
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
+  const service =
+    getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service")?.value || "";
   const url =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url")?.value || DEFAULT_OLLAMA_URL;
   const model =
@@ -67,6 +71,7 @@ function saveSettings(doc: Document): void {
     DEFAULT_OLLAMA_MODEL;
 
   setEngine(engine);
+  setPDFTranslateService(service);
   setOllamaURL(url);
   setOllamaModel(model);
   setSkipLastPages(
@@ -150,26 +155,52 @@ function clearCache(doc: Document): void {
   updateCacheStatus(doc);
 }
 
-function updatePDFTranslateStatus(doc: Document): void {
+function populatePDFTranslateServices(doc: Document): void {
   const api = (Zotero as any).PDFTranslate?.api;
   const target = getElement<HTMLElement>(doc, "bilingualreader-pdftranslate-status");
-  if (!target) return;
+  const select = getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service");
+  if (!target || !select) return;
+
+  select.textContent = "";
+  const defaultOption = doc.createElementNS("http://www.w3.org/1999/xhtml", "option");
+  defaultOption.setAttribute("value", "");
+  defaultOption.textContent = "跟随 Translate for Zotero 当前默认服务";
+  select.append(defaultOption);
 
   if (!api?.translate) {
     target.textContent = "未检测到 Translate for Zotero。请先安装并启用该插件。";
+    select.value = "";
     return;
   }
 
   let version = "";
+  let services: any[] = [];
   try {
     version = api.getVersion?.() || "";
+    const available = api.getServices?.();
+    services = Array.isArray(available) ? available : [];
   } catch (_) {
-    version = "";
+    services = [];
   }
 
+  for (const service of services) {
+    if (service?.type && service.type !== "sentence") continue;
+    const id = String(service?.id || "").trim();
+    if (!id) continue;
+    const option = doc.createElementNS("http://www.w3.org/1999/xhtml", "option");
+    option.setAttribute("value", id);
+    option.textContent = String(service?.name || id);
+    select.append(option);
+  }
+
+  const configured = getPDFTranslateService();
+  const serviceOptions = Array.from(select.querySelectorAll("option")) as HTMLOptionElement[];
+  const hasConfigured = serviceOptions.some((option) => option.value === configured);
+  select.value = hasConfigured ? configured : "";
+
   target.textContent = version
-    ? `已检测到 Translate for Zotero ${version}。Bilingual Reader 将固定跟随它当前的默认服务。`
-    : "已检测到 Translate for Zotero。Bilingual Reader 将固定跟随它当前的默认服务。";
+    ? `已检测到 Translate for Zotero ${version}。默认推荐使用该后端。`
+    : "已检测到 Translate for Zotero。默认推荐使用该后端。";
 }
 
 function registerProjectLink(doc: Document): void {
@@ -216,7 +247,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (requestTimeout) requestTimeout.value = String(getRequestTimeoutMs());
 
   updateBackendVisibility(doc);
-  updatePDFTranslateStatus(doc);
+  populatePDFTranslateServices(doc);
   updateCacheStatus(doc);
   registerProjectLink(doc);
 
@@ -224,6 +255,13 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
     updateBackendVisibility(doc);
     setStatus(doc, "翻译后端已修改，点击“保存设置”后生效。");
   });
+
+  getElement<HTMLSelectElement>(doc, "bilingualreader-pdftranslate-service")?.addEventListener(
+    "change",
+    () => {
+      setStatus(doc, "Translate for Zotero 服务已修改，保存后回到 PDF 点击 🔄 应用。 ");
+    },
+  );
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
     saveSettings(doc);

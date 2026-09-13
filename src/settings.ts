@@ -13,6 +13,7 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 export const DEFAULT_SKIP_LAST_PAGES = 1;
 
 const ENGINE_PREF = `${BASE}.engine`;
+const PDFTRANSLATE_SERVICE_PREF = `${BASE}.pdftranslate.service`;
 const OLLAMA_URL_PREF = `${BASE}.ollama.url`;
 const OLLAMA_MODEL_PREF = `${BASE}.ollama.model`;
 const REQUEST_GAP_PREF = `${BASE}.requestGapMs`;
@@ -50,6 +51,15 @@ export function getEngine(): TranslationEngine {
 
 export function setEngine(engine: TranslationEngine): void {
   setStringPref(ENGINE_PREF, engine);
+}
+
+export function getPDFTranslateService(): string {
+  const value = (Zotero.Prefs as any).get(PDFTRANSLATE_SERVICE_PREF, true);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function setPDFTranslateService(service: string): void {
+  setStringPref(PDFTRANSLATE_SERVICE_PREF, service.trim());
 }
 
 export function getOllamaURL(): string {
@@ -125,6 +135,9 @@ export function setSkipLastPages(value: number): void {
 }
 
 export function getResolvedPDFTranslateService(): string {
+  const selected = getPDFTranslateService();
+  if (selected) return selected;
+
   try {
     const current = (Zotero.Prefs as any).get(
       "extensions.zotero.ZoteroPDFTranslate.translateSource",

@@ -8,6 +8,7 @@ declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
       "engine": string;
+      "pdftranslate.service": string;
       "ollama.url": string;
       "ollama.model": string;
       "requestGapMs": number;
