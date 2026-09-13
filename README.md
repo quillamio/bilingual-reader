@@ -13,7 +13,7 @@
 ## 主要功能
 
 - 🀄 一键开启 / 关闭段落中英对照。
-- 默认调用 **Translate for Zotero** 的翻译服务。
+- 默认调用 **Translate for Zotero** 的翻译服务（推荐使用必应）。
 - 可选 **Ollama** 本地或云端模型。
 - 自动缓存已完成译文。
 - 支持短段落合并、受控并发、请求节流、超时与连续失败暂停。
@@ -47,11 +47,10 @@
 5. 点击 **🔄** 可重新调度翻译。
 6. 点击 **🖨️** 可导出双语 PDF。
 
-
 可以配置：
 
 - Translate for Zotero / Ollama；
-- Translate for Zotero 具体翻译服务；
+- Translate for Zotero 固定跟随其当前默认服务；
 - 不翻译末尾页数；
 - 最大并发请求；
 - 请求启动间隔；
