@@ -49,7 +49,7 @@ describe("startup", function () {
           .getElementById("bilingualreader-introduction")
           ?.textContent?.replace(/\s+/gu, " ")
           .trim(),
-        "在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for Zotero（推荐使用必应）；Ollama 作为可选后端保留。",
+        "在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for Zotero（推荐使用google，其次必应）；Ollama 作为可选后端保留。",
       );
       assert.notExists(win?.document.getElementById("bilingualreader-pdftranslate-service"));
       assert.include(
