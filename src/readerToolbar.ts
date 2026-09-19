@@ -2,6 +2,7 @@ import { cleanupBilingualReader, renderBilingualToolbarButtons } from "./bilingu
 import { cleanupReaderUI, renderReaderExportButton } from "./readerUI";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
+const STARTUP_RECONCILE_DELAYS_MS = [250, 1000, 3000];
 
 type ToolbarRenderer = (event: any) => void;
 
@@ -11,7 +12,37 @@ const toolbarRenderers: ToolbarRenderer[] = [
 ];
 
 let registered = false;
-let reconcileTimer: ReturnType<typeof setInterval> | undefined;
+let reconcileTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+function applyFallbackSectionLayout(section: HTMLElement): void {
+  // Never inherit Zotero's generic ".section" layout rules here. Some Zotero
+  // 10 builds/themes apply a vertical layout to that class, which can stack our
+  // toolbar buttons. Keep the fallback container fully namespaced and explicit.
+  section.classList.remove("section");
+  section.classList.add("bilingual-reader-toolbar-section");
+  section.style.display = "inline-flex";
+  section.style.flexDirection = "row";
+  section.style.alignItems = "center";
+  section.style.flexWrap = "nowrap";
+  section.style.flexShrink = "0";
+  section.style.whiteSpace = "nowrap";
+  section.style.gap = "0";
+  section.style.overflow = "visible";
+}
+
+function getOrCreateFallbackSection(doc: Document, container: Element): HTMLElement {
+  let section = container.querySelector(
+    ".bilingual-reader-toolbar-section",
+  ) as HTMLElement | null;
+
+  if (!section) {
+    section = doc.createElement("div");
+    container.append(section);
+  }
+
+  applyFallbackSectionLayout(section);
+  return section;
+}
 
 /** Catch readers whose toolbar mounted before plugin installation/startup. */
 export function reconcileReaderToolbars(): void {
@@ -27,13 +58,7 @@ export function reconcileReaderToolbars(): void {
         reader,
         doc,
         append: (...elements: HTMLElement[]) => {
-          let section = container.querySelector(".bilingual-reader-toolbar-section");
-          if (!section) {
-            section = doc.createElement("div");
-            section.className = "section bilingual-reader-toolbar-section";
-            container.append(section);
-          }
-          section.append(...elements);
+          getOrCreateFallbackSection(doc, container).append(...elements);
         },
       });
     } catch (error) {
@@ -41,6 +66,24 @@ export function reconcileReaderToolbars(): void {
       Zotero.logError(error as Error);
     }
   }
+}
+
+function clearStartupReconcileTimeouts(): void {
+  for (const timeout of reconcileTimeouts) clearTimeout(timeout);
+  reconcileTimeouts = [];
+}
+
+function scheduleStartupReconcile(): void {
+  clearStartupReconcileTimeouts();
+
+  // One immediate pass handles already-open readers. A few bounded retries
+  // cover restored/slow readers without keeping a permanent polling loop alive.
+  reconcileReaderToolbars();
+  reconcileTimeouts = STARTUP_RECONCILE_DELAYS_MS.map((delay) =>
+    setTimeout(() => {
+      if (registered) reconcileReaderToolbars();
+    }, delay),
+  );
 }
 
 /**
@@ -74,17 +117,12 @@ export function registerReaderToolbar(): void {
   if (registered) return;
   Zotero.Reader.registerEventListener("renderToolbar", renderReaderToolbar, PLUGIN_ID);
   registered = true;
-  reconcileReaderToolbars();
-  // Reconcile newly restored/slow readers and remounted toolbars as well. A
-  // single process timer avoids a timeout race and per-reader observer leaks.
-  reconcileTimer = setInterval(reconcileReaderToolbars, 1000);
+  scheduleStartupReconcile();
 }
 
 export function unregisterReaderToolbar(): void {
-  if (reconcileTimer !== undefined) {
-    clearInterval(reconcileTimer);
-    reconcileTimer = undefined;
-  }
+  clearStartupReconcileTimeouts();
+
   if (registered) {
     Zotero.Reader.unregisterEventListener("renderToolbar", renderReaderToolbar);
     registered = false;
