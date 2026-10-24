@@ -13,8 +13,10 @@
 ## 主要功能
 
 - 🀄 一键开启 / 关闭段落中英对照。
-- 默认调用 **Translate for Zotero** 的翻译服务（推荐使用google，其次必应）。
+- 默认调用 **Translate for Zotero** 的翻译服务。
 - 可选 **Ollama** 本地或云端模型。
+- 可选任意 **OpenAI 兼容服务**：内置智谱 GLM-4.7-Flash（免费）、ModelScope、SiliconFlow、Gemini 预设。
+- 可回填 Zotero 阅读模式漏掉的 Figure：从原 PDF 裁剪图片插入阅读视图和导出 PDF。
 - 自动缓存已完成译文。
 - 支持短段落合并、受控并发、请求节流、超时与连续失败暂停。
 - 可设置“不翻译末尾页数”，用于跳过参考文献。
@@ -49,7 +51,8 @@
 
 可以配置：
 
-- Translate for Zotero / Ollama；
+- Translate for Zotero / Ollama / OpenAI 兼容服务；
+- OpenAI 兼容服务可设置接口地址、模型、API Key、系统提示词和温度；
 - Translate for Zotero 固定跟随其当前默认服务；
 - 不翻译末尾页数；
 - 最大并发请求；
@@ -65,6 +68,28 @@
 当前导出目标是生成**重新排版的可搜索双语 PDF**，再作为附件加入当前 Zotero 文献条目。
 
 它不是在出版社原始 PDF 页面上直接覆盖中文，因此复杂图片、延迟加载内容或特殊排版可能无法完全保留。该功能仍在持续适配 Zotero 10 的打印接口。
+
+## OpenAI 兼容服务
+
+在 `Zotero 设置 → 中英对照 → OpenAI 兼容服务` 中：
+
+- 智谱：点击“填入智谱 GLM-4.7-Flash（免费）”，API Key 来自 bigmodel.cn。
+- ModelScope：点击“填入 ModelScope DeepSeek”，再填入 `ms-...` Token。必须绑定已实名的阿里云账号。
+- SiliconFlow：点击“填入 SiliconFlow”，使用 DeepSeek-V3.2（按量计费）。
+- Gemini：点击“填入 Gemini”，API Key 来自 Google AI Studio；Google AI Pro
+  订阅本身不包含 API 额度，API 计费独立。
+
+API Key 仅保存在本机 Zotero 偏好设置中。
+
+## 缺失图片回填
+
+部分 PDF 在 Zotero 10 阅读模式中不会生成图片块，表现为 Figure 位置空白。开启“回填阅读模式缺失图片”后，插件会：
+
+- 按 Figure caption 和同列正文边界定位图片区域；
+- 从原 PDF 裁剪该区域并插入阅读视图；
+- 导出中英对照 PDF 时一并带上。
+
+区域检测到正文或图内文字时会放弃该图，避免裁错。该功能默认开启，可在 `Zotero 设置 → 中英对照 → 翻译范围` 关闭。
 
 ## 当前限制
 

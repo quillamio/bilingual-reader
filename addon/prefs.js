@@ -1,6 +1,10 @@
 pref("engine", "pdftranslate");
 pref("ollama.url", "http://127.0.0.1:11434");
 pref("ollama.model", "gpt-oss:20b");
+pref("openai.endpoint", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+pref("openai.model", "glm-4.7-flash");
+pref("openai.apiKey", "");
+pref("openai.temperature", "0.2");
 pref("requestGapMs", 250);
 pref("maxConcurrent", 2);
 pref("maxCharsPerRequest", 2800);
@@ -8,3 +12,4 @@ pref("maxBatchParagraphs", 6);
 pref("maxConsecutiveErrors", 3);
 pref("requestTimeoutMs", 60000);
 pref("skipLastPages", 1);
+pref("figureBackfill", true);

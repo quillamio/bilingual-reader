@@ -1,5 +1,16 @@
 # 更新日志
 
+## Unreleased
+
+- 新增 OpenAI 兼容翻译后端，可直连 ModelScope、Gemini、OpenRouter、SiliconFlow 等 `/chat/completions` 服务。
+- 设置页提供 ModelScope、智谱 GLM-4.7-Flash、SiliconFlow 与 Gemini 预设，支持自定义接口、模型、API Key、提示词和温度。
+- 新增“测试连接与翻译”按钮，保存前即可验证接口。
+- 缓存键包含接口、模型、提示词哈希和温度，调整配置后不会误用旧译文。
+- 修复错误路径读取 `responseText` 覆盖真实 HTTP 错误的问题；请求改用 text 响应并自行解析 JSON。
+- Ollama 提示词改为通用学术论文，不再写死生物医学领域。
+- 新增阅读模式缺图回填：按 caption 与正文列边界从原 PDF 裁剪图片，插入阅读视图并随导出 PDF 一起输出。
+- 回填支持双栏分列、跨栏 caption、整页背景块排除与重叠候选去重；检测到正文或图内文字时放弃回填。
+
 ## v0.5.0
 
 - 设置页与 README 更新 Translate for Zotero 服务建议：推荐使用 google，其次使用必应。

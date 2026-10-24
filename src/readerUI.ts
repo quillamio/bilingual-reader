@@ -1,3 +1,5 @@
+import { awaitFigureBackfill } from "./figureBackfill";
+
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
 const PRINTER_EMOJI = "🖨️";
@@ -116,6 +118,11 @@ function buildExportHTML(doc: Document, title: string): string {
   ) as HTMLElement[];
   for (const block of unfinishedBlocks) block.remove();
 
+  const unfinishedFigures = Array.from(
+    root.querySelectorAll(".bilingual-reader-backfill:not([data-state='loaded'])"),
+  ) as HTMLElement[];
+  for (const figure of unfinishedFigures) figure.remove();
+
   const removable = Array.from(
     root.querySelectorAll("script, button, input, textarea, select"),
   ) as HTMLElement[];
@@ -167,6 +174,17 @@ function buildExportHTML(doc: Document, title: string): string {
   figure, table, pre {
     break-inside: avoid-page;
     page-break-inside: avoid;
+  }
+  figure.bilingual-reader-backfill {
+    margin: 1em auto 0.4em !important;
+    text-align: center;
+  }
+  figure.bilingual-reader-backfill img {
+    display: block;
+    margin: 0 auto;
+  }
+  figure.bilingual-reader-backfill[data-state="loading"] {
+    display: none;
   }
   img, svg, canvas {
     max-width: 100% !important;
@@ -361,6 +379,7 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
 
   let importedAttachment: any = null;
   try {
+    await awaitFigureBackfill(doc);
     const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`);
     await printHTMLToPDF(html, tempFile);
     importedAttachment = await importExportedPDF(tempFile, sourceAttachment);
