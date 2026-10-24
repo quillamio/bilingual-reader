@@ -11,15 +11,16 @@
     id="bilingualreader-introduction"
     style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px"
   >
-    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for
-    Zotero（推荐使用google，其次必应）；Ollama 作为可选后端保留。
+    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。可使用 Translate for
+    Zotero、Ollama，或任意 OpenAI 兼容服务（ModelScope 免费 DeepSeek、Gemini 等）。
   </html:p>
 
   <hbox align="center" style="margin-bottom: 10px">
     <html:label for="bilingualreader-engine" style="min-width: 130px">翻译后端</html:label>
     <html:select id="bilingualreader-engine" style="min-width: 320px; padding: 4px 8px">
-      <html:option value="pdftranslate">Translate for Zotero（推荐）</html:option>
+      <html:option value="pdftranslate">Translate for Zotero</html:option>
       <html:option value="ollama">Ollama</html:option>
+      <html:option value="openai">OpenAI 兼容（ModelScope / Gemini）</html:option>
     </html:select>
   </hbox>
 </groupbox>
@@ -37,6 +38,113 @@
   >
     固定跟随 Translate for Zotero 当前默认服务。请在 Translate for Zotero 中切换服务或配置密钥。
     Bilingual Reader 只负责分段、调度、缓存和双语排版。
+  </html:p>
+</groupbox>
+
+<groupbox id="bilingualreader-openai-section">
+  <label><html:h3>OpenAI 兼容服务</html:h3></label>
+  <html:p style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px">
+    适用于 ModelScope、Gemini、OpenRouter、SiliconFlow 等提供
+    <html:code>/chat/completions</html:code> 的服务。API Key 仅保存在本机 Zotero 偏好设置中。
+  </html:p>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-openai-endpoint" style="min-width: 130px"
+      >接口地址</html:label
+    >
+    <html:input
+      id="bilingualreader-openai-endpoint"
+      type="text"
+      style="width: 520px; padding: 4px 6px"
+      placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    />
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-openai-model" style="min-width: 130px">模型</html:label>
+    <html:input
+      id="bilingualreader-openai-model"
+      type="text"
+      style="width: 520px; padding: 4px 6px"
+      placeholder="glm-4.7-flash"
+    />
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-openai-key" style="min-width: 130px">API Key</html:label>
+    <html:input
+      id="bilingualreader-openai-key"
+      type="password"
+      style="width: 520px; padding: 4px 6px"
+      placeholder="ms-... / AIza... / sk-..."
+    />
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 10px">
+    <spacer width="130" />
+    <html:button
+      id="bilingualreader-openai-preset-bigmodel"
+      type="button"
+      style="padding: 5px 12px; margin-right: 8px"
+      >填入智谱 GLM-4.7-Flash（免费）</html:button
+    >
+    <html:button
+      id="bilingualreader-openai-preset-modelscope"
+      type="button"
+      style="padding: 5px 12px; margin-right: 8px"
+      >填入 ModelScope DeepSeek</html:button
+    >
+    <html:button
+      id="bilingualreader-openai-preset-siliconflow"
+      type="button"
+      style="padding: 5px 12px; margin-right: 8px"
+      >填入 SiliconFlow</html:button
+    >
+    <html:button id="bilingualreader-openai-preset-gemini" type="button" style="padding: 5px 12px"
+      >填入 Gemini</html:button
+    >
+  </hbox>
+
+  <hbox align="start" style="margin-bottom: 8px">
+    <html:label for="bilingualreader-openai-prompt" style="min-width: 130px; margin-top: 4px"
+      >系统提示词</html:label
+    >
+    <html:textarea
+      id="bilingualreader-openai-prompt"
+      rows="8"
+      style="width: 520px; padding: 4px 6px; font-family: monospace"
+    ></html:textarea>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 10px">
+    <html:label for="bilingualreader-openai-temperature" style="min-width: 130px"
+      >温度</html:label
+    >
+    <html:input
+      id="bilingualreader-openai-temperature"
+      type="number"
+      min="0"
+      max="2"
+      step="0.1"
+      style="width: 110px; padding: 4px 6px"
+    />
+    <html:span style="margin-left: 10px; max-width: 520px"
+      >学术翻译建议 0.1–0.3。</html:span
+    >
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 10px">
+    <spacer width="130" />
+    <html:button id="bilingualreader-test-openai" type="button" style="padding: 5px 12px"
+      >测试连接与翻译</html:button
+    >
+  </hbox>
+
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    智谱：GLM-4.7-Flash 官方免费，API Key 来自 bigmodel.cn。ModelScope：创建
+    <html:code>ms-...</html:code> Token，必须绑定已实名的阿里云账号；401 通常是未绑定或
+    Token 失效。SiliconFlow：DeepSeek-V3.2 按量计费。Gemini：Google AI Pro
+    订阅本身不包含 API 额度，需在 AI Studio 单独使用 API Key。
   </html:p>
 </groupbox>
 
@@ -61,6 +169,7 @@
   <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
     插件同时继续跳过 Zotero 已明确标记为参考文献的结构化段落。页数限制按 PDF 物理页计算。
   </html:p>
+
 </groupbox>
 
 <groupbox id="bilingualreader-speed-section">

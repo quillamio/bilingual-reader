@@ -5,6 +5,10 @@ import {
   DEFAULT_MAX_CONSECUTIVE_ERRORS,
   DEFAULT_OLLAMA_MODEL,
   DEFAULT_OLLAMA_URL,
+  DEFAULT_OPENAI_ENDPOINT,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENAI_PROMPT,
+  DEFAULT_OPENAI_TEMPERATURE,
   DEFAULT_REQUEST_GAP_MS,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_SKIP_LAST_PAGES,
@@ -15,6 +19,11 @@ import {
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
+  getOpenAIApiKey,
+  getOpenAIEndpoint,
+  getOpenAIModel,
+  getOpenAIPrompt,
+  getOpenAITemperature,
   getRequestGapMs,
   getRequestTimeoutMs,
   getSkipLastPages,
@@ -25,11 +34,17 @@ import {
   setMaxConsecutiveErrors,
   setOllamaModel,
   setOllamaURL,
+  setOpenAIApiKey,
+  setOpenAIEndpoint,
+  setOpenAIModel,
+  setOpenAIPrompt,
+  setOpenAITemperature,
   setRequestGapMs,
   setRequestTimeoutMs,
   setSkipLastPages,
   type TranslationEngine,
 } from "../settings";
+import { requestOpenAITranslation } from "../openaiClient";
 import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
 
 const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
@@ -47,8 +62,10 @@ function updateBackendVisibility(doc: Document): void {
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const pdfSection = getElement<HTMLElement>(doc, "bilingualreader-pdftranslate-section");
   const ollamaSection = getElement<HTMLElement>(doc, "bilingualreader-ollama-section");
+  const openaiSection = getElement<HTMLElement>(doc, "bilingualreader-openai-section");
   if (pdfSection) pdfSection.hidden = engine !== "pdftranslate";
   if (ollamaSection) ollamaSection.hidden = engine !== "ollama";
+  if (openaiSection) openaiSection.hidden = engine !== "openai";
 }
 
 function readNumberInput(doc: Document, id: string, fallback: number): number {
@@ -59,7 +76,8 @@ function readNumberInput(doc: Document, id: string, fallback: number): number {
 
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
-  const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
+  const engine: TranslationEngine =
+    engineValue === "ollama" ? "ollama" : engineValue === "openai" ? "openai" : "pdftranslate";
   const url =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url")?.value || DEFAULT_OLLAMA_URL;
   const model =
@@ -69,6 +87,26 @@ function saveSettings(doc: Document): void {
   setEngine(engine);
   setOllamaURL(url);
   setOllamaModel(model);
+  setOpenAIEndpoint(
+    getElement<HTMLInputElement>(doc, "bilingualreader-openai-endpoint")?.value ||
+      DEFAULT_OPENAI_ENDPOINT,
+  );
+  setOpenAIModel(
+    getElement<HTMLInputElement>(doc, "bilingualreader-openai-model")?.value ||
+      DEFAULT_OPENAI_MODEL,
+  );
+  setOpenAIApiKey(getElement<HTMLInputElement>(doc, "bilingualreader-openai-key")?.value || "");
+  setOpenAIPrompt(
+    getElement<HTMLTextAreaElement>(doc, "bilingualreader-openai-prompt")?.value ||
+      DEFAULT_OPENAI_PROMPT,
+  );
+  setOpenAITemperature(
+    readNumberInput(
+      doc,
+      "bilingualreader-openai-temperature",
+      DEFAULT_OPENAI_TEMPERATURE,
+    ),
+  );
   setSkipLastPages(
     readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
   );
@@ -135,6 +173,90 @@ async function testOllama(doc: Document): Promise<void> {
   }
 }
 
+const OPENAI_PRESETS: Record<
+  string,
+  { endpoint: string; model: string; status: string }
+> = {
+  bigmodel: {
+    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    model: "glm-4.7-flash",
+    status: "已填入智谱 GLM-4.7-Flash（官方免费）。请填写 BigModel API Key。",
+  },
+  modelscope: {
+    endpoint: "https://api-inference.modelscope.cn/v1/chat/completions",
+    model: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    status:
+      "已填入 ModelScope DeepSeek。若返回 401，请绑定实名阿里云账号；若返回 no provider，改用 Qwen/Qwen3.8-Flash-Next。",
+  },
+  siliconflow: {
+    endpoint: "https://api.siliconflow.cn/v1/chat/completions",
+    model: "deepseek-ai/DeepSeek-V3.2",
+    status: "已填入 SiliconFlow DeepSeek-V3.2（按量计费）。请填写 SiliconFlow API Key。",
+  },
+  gemini: {
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    model: "gemini-3.6-flash",
+    status:
+      "已填入 Gemini API。Google AI Pro 订阅不含 API 额度，需使用 AI Studio 的 API Key 与独立计费/免费层。",
+  },
+};
+
+function applyOpenAIPreset(doc: Document, presetKey: string): void {
+  const preset = OPENAI_PRESETS[presetKey];
+  if (!preset) return;
+  const endpoint = getElement<HTMLInputElement>(doc, "bilingualreader-openai-endpoint");
+  const model = getElement<HTMLInputElement>(doc, "bilingualreader-openai-model");
+  if (endpoint) endpoint.value = preset.endpoint;
+  if (model) model.value = preset.model;
+  setStatus(doc, preset.status);
+}
+
+async function testOpenAI(doc: Document): Promise<void> {
+  const endpoint =
+    getElement<HTMLInputElement>(doc, "bilingualreader-openai-endpoint")?.value ||
+    DEFAULT_OPENAI_ENDPOINT;
+  const model =
+    getElement<HTMLInputElement>(doc, "bilingualreader-openai-model")?.value ||
+    DEFAULT_OPENAI_MODEL;
+  const apiKey = getElement<HTMLInputElement>(doc, "bilingualreader-openai-key")?.value || "";
+  const prompt =
+    getElement<HTMLTextAreaElement>(doc, "bilingualreader-openai-prompt")?.value ||
+    DEFAULT_OPENAI_PROMPT;
+  const temperature = readNumberInput(
+    doc,
+    "bilingualreader-openai-temperature",
+    DEFAULT_OPENAI_TEMPERATURE,
+  );
+
+  if (!apiKey.trim()) {
+    setStatus(doc, "请先填写 API Key。");
+    return;
+  }
+
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-openai");
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  setStatus(doc, `正在测试 ${model} …`);
+  try {
+    const translated = await requestOpenAITranslation(
+      {
+        endpoint,
+        apiKey,
+        model,
+        systemPrompt: prompt,
+        temperature,
+        timeoutMs: getRequestTimeoutMs(),
+      },
+      "Automatic first-arrival picking is a key step in seismic processing.",
+    );
+    setStatus(doc, `连接成功：${translated.slice(0, 120)}`);
+  } catch (error: any) {
+    setStatus(doc, `连接失败：${error?.message || String(error)}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function updateCacheStatus(doc: Document): void {
   const status = getElement<HTMLElement>(doc, "bilingualreader-cache-status");
   if (!status) return;
@@ -193,6 +315,14 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine");
   const url = getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url");
   const model = getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model");
+  const openaiEndpoint = getElement<HTMLInputElement>(doc, "bilingualreader-openai-endpoint");
+  const openaiModel = getElement<HTMLInputElement>(doc, "bilingualreader-openai-model");
+  const openaiKey = getElement<HTMLInputElement>(doc, "bilingualreader-openai-key");
+  const openaiPrompt = getElement<HTMLTextAreaElement>(doc, "bilingualreader-openai-prompt");
+  const openaiTemperature = getElement<HTMLInputElement>(
+    doc,
+    "bilingualreader-openai-temperature",
+  );
   const skipLastPages = getElement<HTMLInputElement>(doc, "bilingualreader-skip-last-pages");
   const maxConcurrent = getElement<HTMLInputElement>(doc, "bilingualreader-max-concurrent");
   const gap = getElement<HTMLInputElement>(doc, "bilingualreader-request-gap");
@@ -207,6 +337,11 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
   if (model) model.value = getOllamaModel();
+  if (openaiEndpoint) openaiEndpoint.value = getOpenAIEndpoint();
+  if (openaiModel) openaiModel.value = getOpenAIModel();
+  if (openaiKey) openaiKey.value = getOpenAIApiKey();
+  if (openaiPrompt) openaiPrompt.value = getOpenAIPrompt();
+  if (openaiTemperature) openaiTemperature.value = String(getOpenAITemperature());
   if (skipLastPages) skipLastPages.value = String(getSkipLastPages());
   if (maxConcurrent) maxConcurrent.value = String(getMaxConcurrent());
   if (gap) gap.value = String(getRequestGapMs());
@@ -233,6 +368,41 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
     "click",
     () => {
       void testOllama(doc);
+    },
+  );
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-openai-preset-bigmodel")?.addEventListener(
+    "click",
+    () => {
+      applyOpenAIPreset(doc, "bigmodel");
+    },
+  );
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-openai-preset-modelscope")?.addEventListener(
+    "click",
+    () => {
+      applyOpenAIPreset(doc, "modelscope");
+    },
+  );
+
+  getElement<HTMLButtonElement>(
+    doc,
+    "bilingualreader-openai-preset-siliconflow",
+  )?.addEventListener("click", () => {
+    applyOpenAIPreset(doc, "siliconflow");
+  });
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-openai-preset-gemini")?.addEventListener(
+    "click",
+    () => {
+      applyOpenAIPreset(doc, "gemini");
+    },
+  );
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-test-openai")?.addEventListener(
+    "click",
+    () => {
+      void testOpenAI(doc);
     },
   );
 

@@ -9,6 +9,11 @@ import {
   getMaxConsecutiveErrors,
   getOllamaModel,
   getOllamaURL,
+  getOpenAIApiKey,
+  getOpenAIEndpoint,
+  getOpenAIModel,
+  getOpenAIPrompt,
+  getOpenAITemperature,
   getRequestGapMs,
   getRequestTimeoutMs,
   getSkipLastPages,
@@ -30,6 +35,7 @@ import {
   type BatchInput,
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
+import { requestOpenAITranslation } from "./openaiClient";
 import { cleanupReadingLayout, observeReadingLayout } from "./readingLayout";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
@@ -190,7 +196,7 @@ async function translateWithOllama(text: string): Promise<TranslationResponse> {
       {
         role: "system",
         content:
-          "你是专业的生物医学论文翻译助手。把用户提供的英文准确翻译为简体中文。保留基因、蛋白、药物、统计学符号、数字、单位、图表编号和文献引用；不要总结，不要解释，不要添加前言，只输出译文。如果出现 [[BRSEG_0000]] 这类分段标记，必须逐字原样保留标记及其顺序。",
+          "你是专业的学术论文翻译助手。把用户提供的英文准确翻译为简体中文。保留数字、单位、公式、变量名、专业术语、图表编号和文献引用；不要总结，不要解释，不要添加前言，只输出译文。如果出现 [[BRSEG_0000]] 这类分段标记，必须逐字原样保留标记及其顺序。",
       },
       {
         role: "user",
@@ -231,6 +237,21 @@ async function translateWithOllama(text: string): Promise<TranslationResponse> {
   return { text: result.trim(), engineTag: getCacheEngineTag() };
 }
 
+async function translateWithOpenAI(text: string): Promise<TranslationResponse> {
+  const translated = await requestOpenAITranslation(
+    {
+      endpoint: getOpenAIEndpoint(),
+      apiKey: getOpenAIApiKey(),
+      model: getOpenAIModel(),
+      systemPrompt: getOpenAIPrompt(),
+      temperature: getOpenAITemperature(),
+      timeoutMs: getRequestTimeoutMs(),
+    },
+    text,
+  );
+  return { text: translated, engineTag: getCacheEngineTag() };
+}
+
 async function translateText(
   text: string,
   itemID: number,
@@ -238,6 +259,9 @@ async function translateText(
 ): Promise<TranslationResponse> {
   if (engine === "ollama") {
     return translateWithOllama(text);
+  }
+  if (engine === "openai") {
+    return translateWithOpenAI(text);
   }
   return translateWithPDFTranslate(text, itemID);
 }
@@ -563,7 +587,6 @@ function clearTranslations(doc: Document): void {
       // Reader may have replaced the SDT iframe while cleaning up.
     }
   }
-
   const root = getDocumentRoot(doc);
   if (root) delete root.dataset.bilingualReaderRunning;
   cleanupReadingLayout(doc);
@@ -884,10 +907,18 @@ export function configureTranslation(reader: any): void {
 
   const currentEngine = getEngine();
   const answer = win.prompt(
-    "快速切换翻译后端：\n1 = Translate for Zotero（推荐）\n2 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
-    currentEngine === "ollama" ? "2" : "1",
+    "快速切换翻译后端：\n1 = Translate for Zotero\n2 = Ollama\n3 = OpenAI 兼容（ModelScope / Gemini）\n\n完整设置请前往 Zotero 设置 → 中英对照。",
+    currentEngine === "ollama" ? "2" : currentEngine === "openai" ? "3" : "1",
   );
   if (answer === null) return;
+
+  if (String(answer).trim() === "3") {
+    setEngine("openai");
+    win.alert?.(
+      "已切换为 OpenAI 兼容后端。接口地址、模型和 API Key 请在 Zotero 设置 → 中英对照 中配置。点击 🔄 即可重试。",
+    );
+    return;
+  }
 
   if (String(answer).trim() === "2") {
     const url = win.prompt("Ollama 地址：", getOllamaURL() || DEFAULT_OLLAMA_URL);

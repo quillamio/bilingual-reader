@@ -10,6 +10,10 @@ declare namespace _ZoteroTypes {
       "engine": string;
       "ollama.url": string;
       "ollama.model": string;
+      "openai.endpoint": string;
+      "openai.model": string;
+      "openai.apiKey": string;
+      "openai.temperature": string;
       "requestGapMs": number;
       "maxConcurrent": number;
       "maxCharsPerRequest": number;
