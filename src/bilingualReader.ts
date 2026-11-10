@@ -31,6 +31,8 @@ import {
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
 import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
+import { isManagedService, getServiceDefinition } from "./serviceCatalog";
+import { translateNativeParagraph } from "./nativeTranslation";
 import { cleanupReadingLayout, observeReadingLayout } from "./readingLayout";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
@@ -240,9 +242,11 @@ async function translateText(
   if (engine === "ollama") {
     return translateWithOllama(text);
   }
-  if (isBuiltInEngine(engine)) {
-    const translated = await translateWithBuiltIn(text, engine);
-    return { text: translated, engineTag: `builtin:${engine}:en:zh-CN` };
+  if (isManagedService(engine)) {
+    const translated = isBuiltInEngine(engine)
+      ? await translateWithBuiltIn(text, engine)
+      : await translateNativeParagraph(text, engine);
+    return { text: translated, engineTag: getCacheEngineTag() };
   }
   return translateWithPDFTranslate(text, itemID);
 }
@@ -622,12 +626,13 @@ async function translateParagraphs(
   engineTag: string,
 ): Promise<void> {
   const maxErrors = getMaxConsecutiveErrors();
-  const requestGapMs = isBuiltInEngine(engine)
+  const freeService = getServiceDefinition(engine)?.group === "free";
+  const requestGapMs = freeService
     ? Math.max(engine === "bing" ? 300 : 750, getRequestGapMs())
     : getRequestGapMs();
   const requestTimeoutMs = getRequestTimeoutMs();
   const configuredConcurrent = getMaxConcurrent();
-  const concurrency = engine === "ollama" || isBuiltInEngine(engine) ? 1 : configuredConcurrent;
+  const concurrency = engine === "ollama" || freeService ? 1 : configuredConcurrent;
   const pendingIndexes = paragraphs
     .map((paragraph, index) => (paragraph.translation ? -1 : index))
     .filter((index) => index >= 0);
@@ -655,7 +660,7 @@ async function translateParagraphs(
   const jobs = packBatchItems(
     jobItems,
     getMaxCharsPerRequest(),
-    isBuiltInEngine(engine) ? 1 : getMaxBatchParagraphs(),
+    isManagedService(engine) ? 1 : getMaxBatchParagraphs(),
   );
 
   let cursor = 0;
