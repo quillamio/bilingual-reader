@@ -362,6 +362,72 @@ describe("startup", function () {
     }
   });
 
+  it("should render independent per-service input fields on selection", async function () {
+    this.timeout(10000);
+    const win = Zotero.Utilities.Internal.openPreferences("bilingual-reader-preferences");
+    assert.exists(win);
+    try {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (win?.document.getElementById("bilingualreader-engine")) break;
+        await Zotero.Promise.delay(50);
+      }
+      const selector = win!.document.getElementById("bilingualreader-engine") as HTMLSelectElement;
+      selector.value = "gemini";
+      selector.dispatchEvent(new win!.Event("change"));
+      const secret = win!.document.getElementById(
+        "bilingualreader-service-field-secret",
+      ) as HTMLInputElement;
+      const endpoint = win!.document.getElementById(
+        "bilingualreader-service-field-endpoint",
+      ) as HTMLInputElement;
+      assert.equal(secret.type, "password");
+      assert.include(endpoint.value, "generativelanguage.googleapis.com");
+      selector.value = "libretranslate";
+      selector.dispatchEvent(new win!.Event("change"));
+      assert.equal(
+        (win!.document.getElementById(
+          "bilingualreader-service-field-endpoint",
+        ) as HTMLInputElement).value,
+        "http://127.0.0.1:5000",
+      );
+      selector.value = "youdao";
+      selector.dispatchEvent(new win!.Event("change"));
+      assert.equal(
+        win!.document.getElementById("bilingualreader-service-fields")?.children.length,
+        0,
+      );
+    } finally {
+      win?.close();
+    }
+  });
+
+  it("should perform CNKI encryption and token exchange without PDFTranslate", async function () {
+    this.timeout(10000);
+    const previousRequest = Zotero.HTTP.request;
+    const previousPDFTranslate = (Zotero as any).PDFTranslate;
+    const requests: string[] = [];
+    try {
+      (Zotero as any).PDFTranslate = undefined;
+      (Zotero.HTTP as any).request = async (method: string, url: string, options: any) => {
+        requests.push(url);
+        if (url.includes("/getToken")) {
+          assert.equal(method, "GET");
+          return { status: 200, response: { code: 200, data: "mock-cnki-token" } };
+        }
+        assert.equal(options.headers.Token, "mock-cnki-token");
+        const requestBody = JSON.parse(options.body);
+        assert.isString(requestBody.words);
+        assert.notInclude(requestBody.words, "Clinical outcome");
+        return { status: 200, response: { data: { mResult: "临床结局。" } } };
+      };
+      assert.equal(await translateNativeParagraph("Clinical outcome", "cnki"), "临床结局。");
+      assert.equal(requests.length, 2);
+    } finally {
+      (Zotero.HTTP as any).request = previousRequest;
+      (Zotero as any).PDFTranslate = previousPDFTranslate;
+    }
+  });
+
   it("should translate through the selected Ollama engine", async function () {
     this.timeout(10000);
     const enginePref = "extensions.zotero.bilingualreader.engine";
