@@ -31,7 +31,7 @@ import {
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
 import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
-import { isManagedService, getServiceDefinition } from "./serviceCatalog";
+import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
 import { translateNativeParagraph } from "./nativeTranslation";
 import { cleanupReadingLayout, observeReadingLayout } from "./readingLayout";
 
@@ -811,6 +811,7 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
   }
 
   const engine = getEngine();
+  if (isManagedService(engine)) assertServiceConfigured(engine);
   const engineTag = getCacheEngineTag();
   const structure = getSDTStructure(reader);
   const paragraphs = collectParagraphs(doc, itemKey, engineTag, structure);
