@@ -3,6 +3,10 @@ import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
 import { clearTranslationCache } from "../src/translationCache";
+import {
+  parseBingTranslation,
+  parseGoogleTranslation,
+} from "../src/builtInTranslationServices";
 
 describe("startup", function () {
   it("should have plugin instance defined", function () {
@@ -40,16 +44,15 @@ describe("startup", function () {
 
       assert.deepEqual(
         Array.from(engine?.options || []).map((option) => option.value),
-        ["pdftranslate", "ollama"],
+        ["google", "googleapi", "bing", "pdftranslate", "ollama"],
       );
-      assert.equal(engine?.value, "pdftranslate");
+      assert.include(["google", "googleapi", "bing", "pdftranslate", "ollama"], engine?.value);
       assert.equal(skipLastPages?.value, "1");
-      assert.equal(
+      assert.include(
         win?.document
           .getElementById("bilingualreader-introduction")
-          ?.textContent?.replace(/\s+/gu, " ")
-          .trim(),
-        "在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for Zotero（推荐使用google，其次必应）；Ollama 作为可选后端保留。",
+          ?.textContent?.replace(/\s+/gu, " ") || "",
+        "内置 Google 翻译默认免 API Key",
       );
       assert.notExists(win?.document.getElementById("bilingualreader-pdftranslate-service"));
       assert.include(
@@ -195,6 +198,77 @@ describe("startup", function () {
       } else {
         Zotero.Prefs.set(obsoleteServicePref, previousObsoleteService, true);
       }
+    }
+  });
+
+  it("should parse built-in translation responses without accepting empty results", function () {
+    assert.equal(parseGoogleTranslation([[["译文一", "first"], ["译文二", "second"]]]), "译文一译文二");
+    assert.equal(
+      parseBingTranslation([{ translations: [{ text: "必应译文" }] }]),
+      "必应译文",
+    );
+    assert.throws(() => parseGoogleTranslation({ error: "changed" }), /Google/u);
+    assert.throws(() => parseBingTranslation([]), /Bing/u);
+  });
+
+  it("should translate directly via Google without Translate for Zotero", async function () {
+    this.timeout(10000);
+    const prefKey = "extensions.zotero.bilingualreader.engine";
+    const previousEngine = Zotero.Prefs.get(prefKey, true);
+    const previousPDFTranslate = (Zotero as any).PDFTranslate;
+    const previousRequest = Zotero.HTTP.request;
+    let requestURL = "";
+    let shownError = "";
+
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("google-test");
+    const content = doc.createElement("div");
+    content.id = "sdt-content";
+    const paragraph = doc.createElement("p");
+    paragraph.dataset.refPath = "0";
+    paragraph.textContent = `A synthetic Google paragraph ${Date.now()}.`;
+    content.append(paragraph);
+    doc.body.append(content);
+
+    const reader = {
+      itemID: 2147483632,
+      _iframeWindow: { alert: (message: string) => { shownError = message; } },
+      _internalReader: {
+        _lastViewPrimary: true,
+        _primarySDTView: {
+          _iframeDocument: doc,
+          getData: () => ({ structure: null }),
+        },
+      },
+    };
+
+    try {
+      Zotero.Prefs.set(prefKey, "google", true);
+      (Zotero as any).PDFTranslate = undefined;
+      (Zotero.HTTP as any).request = async (method: string, url: string) => {
+        assert.equal(method, "GET");
+        requestURL = url;
+        return {
+          status: 200,
+          response: [[["内置 Google 翻译成功。", "source text"]]],
+        };
+      };
+
+      await toggleBilingualReading(reader);
+      assert.include(requestURL, "https://translate.google.com/translate_a/single?");
+      assert.include(requestURL, "client=gtx");
+      assert.include(requestURL, "tl=zh-CN");
+      assert.equal(shownError, "");
+      assert.equal(
+        doc.querySelector(".bilingual-reader-translation")?.textContent,
+        "内置 Google 翻译成功。",
+      );
+    } finally {
+      await toggleBilingualReading(reader);
+      clearTranslationCache();
+      (Zotero.HTTP as any).request = previousRequest;
+      (Zotero as any).PDFTranslate = previousPDFTranslate;
+      if (previousEngine === undefined) Zotero.Prefs.clear(prefKey, true);
+      else Zotero.Prefs.set(prefKey, previousEngine, true);
     }
   });
 

@@ -30,6 +30,7 @@ import {
   type BatchInput,
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
+import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
 import { cleanupReadingLayout, observeReadingLayout } from "./readingLayout";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
@@ -238,6 +239,10 @@ async function translateText(
 ): Promise<TranslationResponse> {
   if (engine === "ollama") {
     return translateWithOllama(text);
+  }
+  if (isBuiltInEngine(engine)) {
+    const translated = await translateWithBuiltIn(text, engine);
+    return { text: translated, engineTag: `builtin:${engine}:en:zh-CN` };
   }
   return translateWithPDFTranslate(text, itemID);
 }
@@ -617,10 +622,12 @@ async function translateParagraphs(
   engineTag: string,
 ): Promise<void> {
   const maxErrors = getMaxConsecutiveErrors();
-  const requestGapMs = getRequestGapMs();
+  const requestGapMs = isBuiltInEngine(engine)
+    ? Math.max(engine === "bing" ? 300 : 750, getRequestGapMs())
+    : getRequestGapMs();
   const requestTimeoutMs = getRequestTimeoutMs();
   const configuredConcurrent = getMaxConcurrent();
-  const concurrency = engine === "ollama" ? 1 : configuredConcurrent;
+  const concurrency = engine === "ollama" || isBuiltInEngine(engine) ? 1 : configuredConcurrent;
   const pendingIndexes = paragraphs
     .map((paragraph, index) => (paragraph.translation ? -1 : index))
     .filter((index) => index >= 0);
@@ -644,7 +651,12 @@ async function translateParagraphs(
     paragraphIndex,
     text: paragraphs[paragraphIndex].sourceText,
   }));
-  const jobs = packBatchItems(jobItems, getMaxCharsPerRequest(), getMaxBatchParagraphs());
+  // Free web endpoints may modify the BRSEG markers: translate one paragraph at a time.
+  const jobs = packBatchItems(
+    jobItems,
+    getMaxCharsPerRequest(),
+    isBuiltInEngine(engine) ? 1 : getMaxBatchParagraphs(),
+  );
 
   let cursor = 0;
   let completed = 0;
@@ -884,12 +896,18 @@ export function configureTranslation(reader: any): void {
 
   const currentEngine = getEngine();
   const answer = win.prompt(
-    "快速切换翻译后端：\n1 = Translate for Zotero（推荐）\n2 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
-    currentEngine === "ollama" ? "2" : "1",
+    "快速切换翻译后端:\n1 = Google 翻译（免 API Key，默认）\n2 = Bing 翻译（免 API Key）\n3 = Translate for Zotero\n4 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
+    currentEngine === "google"
+      ? "1"
+      : currentEngine === "bing"
+        ? "2"
+        : currentEngine === "pdftranslate"
+          ? "3"
+          : "4",
   );
   if (answer === null) return;
 
-  if (String(answer).trim() === "2") {
+  if (String(answer).trim() === "4") {
     const url = win.prompt("Ollama 地址：", getOllamaURL() || DEFAULT_OLLAMA_URL);
     if (url === null) return;
 
@@ -906,8 +924,11 @@ export function configureTranslation(reader: any): void {
     return;
   }
 
-  setEngine("pdftranslate");
-  win.alert?.("已切换为 Translate for Zotero，并跟随其当前默认服务。点击 🔄 即可重试。");
+  const choice = String(answer).trim();
+  const selectedEngine: TranslationEngine =
+    choice === "2" ? "bing" : choice === "3" ? "pdftranslate" : "google";
+  setEngine(selectedEngine);
+  win.alert?.("翻译后端已更新。点击 🔄 即可重新翻译。");
 }
 
 function createToolbarButton(

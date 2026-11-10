@@ -47,8 +47,12 @@ function updateBackendVisibility(doc: Document): void {
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const pdfSection = getElement<HTMLElement>(doc, "bilingualreader-pdftranslate-section");
   const ollamaSection = getElement<HTMLElement>(doc, "bilingualreader-ollama-section");
+  const builtInSection = getElement<HTMLElement>(doc, "bilingualreader-builtin-section");
   if (pdfSection) pdfSection.hidden = engine !== "pdftranslate";
   if (ollamaSection) ollamaSection.hidden = engine !== "ollama";
+  if (builtInSection) {
+    builtInSection.hidden = engine !== "google" && engine !== "googleapi" && engine !== "bing";
+  }
 }
 
 function readNumberInput(doc: Document, id: string, fallback: number): number {
@@ -59,7 +63,13 @@ function readNumberInput(doc: Document, id: string, fallback: number): number {
 
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
-  const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
+  const engine: TranslationEngine =
+    engineValue === "ollama" ||
+    engineValue === "pdftranslate" ||
+    engineValue === "bing" ||
+    engineValue === "googleapi"
+      ? engineValue
+      : "google";
   const url =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url")?.value || DEFAULT_OLLAMA_URL;
   const model =

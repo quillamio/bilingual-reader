@@ -11,17 +11,30 @@
     id="bilingualreader-introduction"
     style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px"
   >
-    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for
-    Zotero（推荐使用google，其次必应）；Ollama 作为可选后端保留。
+    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。内置 Google 翻译默认免 API Key，
+    不需要额外安装 Translate for Zotero；也可选 Bing、Translate for Zotero 或 Ollama。
   </html:p>
 
   <hbox align="center" style="margin-bottom: 10px">
     <html:label for="bilingualreader-engine" style="min-width: 130px">翻译后端</html:label>
     <html:select id="bilingualreader-engine" style="min-width: 320px; padding: 4px 8px">
-      <html:option value="pdftranslate">Translate for Zotero（推荐）</html:option>
-      <html:option value="ollama">Ollama</html:option>
+      <html:option value="google">Google 翻译（免 API Key，默认）</html:option>
+      <html:option value="googleapi">Google 翻译备用入口（免 API Key）</html:option>
+      <html:option value="bing">Bing 翻译（免 API Key）</html:option>
+      <html:option value="pdftranslate">Translate for Zotero（兼容模式）</html:option>
+      <html:option value="ollama">Ollama（本地/云端）</html:option>
     </html:select>
   </hbox>
+</groupbox>
+
+<groupbox id="bilingualreader-builtin-section">
+  <label><html:h3>内置免费翻译</html:h3></label>
+  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
+    不需要 API Key 或安装其他翻译插件，但必须联网。Google / Bing 使用非官方网页翻译接口，
+    可能受地区访问、服务变更和频率限制影响，并非承诺永久免费或稳定。
+    文献正文会发送至选定的翻译提供商。内置服务默认单段请求、串行运行，避免合并段落造成译文错位。
+    如果 Google 不可用，可以手动切换备用入口、Bing 或其他后端。
+  </html:p>
 </groupbox>
 
 <groupbox id="bilingualreader-pdftranslate-section">
@@ -79,7 +92,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 2。通常比完全串行明显更快，同时避免一次发出过多请求。</html:span
+      >默认 2。内置 Google/Bing 为保护免费接口自动使用串行请求；此处并发设置适用于兼容后端。</html:span
     >
   </hbox>
 
@@ -96,7 +109,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 250。公共免费服务若频繁限流，可提高到 500–1000。</html:span
+      >默认 250。Google 内置引擎最少间隔 750 毫秒，Bing 最少间隔 300 毫秒；遭遇限流可适当增加。</html:span
     >
   </hbox>
 
@@ -130,7 +143,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 6。短段落会在字符上限内合并请求；标记未被翻译服务保留时会自动逐段重试。设为 1
+      >默认 6。仅兼容后端使用多段合并；内置 Google/Bing 始终逐段翻译。设为 1
       可关闭合并。</html:span
     >
   </hbox>
