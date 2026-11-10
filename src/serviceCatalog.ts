@@ -152,7 +152,10 @@ export function updateServiceSettings(id: string, values: Record<string, string>
     if (field.type === "url" && incoming && !/^https?:\/\/\S+$/i.test(incoming)) {
       throw new Error(field.label + " 必须是 http:// 或 https:// 地址。");
     }
-    if (field.required && !incoming) throw new Error(field.label + " 不能为空。");
+    // An API key may be deliberately cleared. Missing keys are rejected when translating.
+    if (field.required && field.key !== "secret" && !incoming) {
+      throw new Error(field.label + " 不能为空。");
+    }
     if (field.type === "select" && field.options && !field.options.some((opt) => opt.value === incoming)) {
       throw new Error(field.label + " 选项无效。");
     }
