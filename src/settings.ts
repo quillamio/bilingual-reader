@@ -141,8 +141,11 @@ export function getResolvedPDFTranslateService(): string {
   }
 }
 
-export function getCacheEngineTag(actualPDFTranslateService?: string): string {
-  const engine = getEngine();
+export function getCacheEngineTag(
+  actualPDFTranslateService?: string,
+  requestedEngine: TranslationEngine = getEngine(),
+): string {
+  const engine = requestedEngine;
   if (engine === "ollama") {
     return `ollama:${getOllamaURL()}:${getOllamaModel()}`;
   }
