@@ -177,7 +177,7 @@ async function translateWithPDFTranslate(
     throw new Error(result || "Translate for Zotero 未返回译文，请检查翻译服务配置或网络状态。");
   }
   const actualService = String(task?.service || "").trim();
-  return { text: result, engineTag: getCacheEngineTag(actualService) };
+  return { text: result, engineTag: getCacheEngineTag(actualService, "pdftranslate") };
 }
 
 async function translateWithOllama(text: string): Promise<TranslationResponse> {
@@ -231,7 +231,7 @@ async function translateWithOllama(text: string): Promise<TranslationResponse> {
   if (!result || typeof result !== "string") {
     throw new Error("Ollama 未返回有效译文。请确认 Ollama 已启动、模型名称正确并可正常运行。");
   }
-  return { text: result.trim(), engineTag: getCacheEngineTag() };
+  return { text: result.trim(), engineTag: getCacheEngineTag(undefined, "ollama") };
 }
 
 async function translateText(
@@ -246,7 +246,7 @@ async function translateText(
     const translated = isBuiltInEngine(engine)
       ? await translateWithBuiltIn(text, engine)
       : await translateNativeParagraph(text, engine);
-    return { text: translated, engineTag: getCacheEngineTag() };
+    return { text: translated, engineTag: getCacheEngineTag(undefined, engine) };
   }
   return translateWithPDFTranslate(text, itemID);
 }
@@ -742,7 +742,7 @@ async function translateParagraphs(
             itemKey,
             paragraph.sourceText,
             response.text,
-            response.engineTag || engineTag,
+            engine === "pdftranslate" ? response.engineTag || engineTag : engineTag,
             isFailureText,
           );
 
@@ -812,7 +812,7 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
 
   const engine = getEngine();
   if (isManagedService(engine)) assertServiceConfigured(engine);
-  const engineTag = getCacheEngineTag();
+  const engineTag = getCacheEngineTag(undefined, engine);
   const structure = getSDTStructure(reader);
   const paragraphs = collectParagraphs(doc, itemKey, engineTag, structure);
   if (!paragraphs.length) {
