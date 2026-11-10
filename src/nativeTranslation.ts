@@ -7,6 +7,7 @@ import { getServiceSetting, assertServiceConfigured, isManagedService } from "./
 import { getRequestTimeoutMs } from "./settings";
 import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
 import { translateSignedService } from "./signedTranslationServices";
+import { translateEncryptedWebService } from "./encryptedWebTranslation";
 
 type Headers = Record<string, string>;
 function setting(id: string, field: string): string {
@@ -165,6 +166,8 @@ async function translateSingle(text: string, id: string): Promise<string> {
       return ensureText(res?.auto_translation?.join("\n"), "腾讯 Transmart");
     }
     case "mymemory": return memoryTranslate(text);
+    case "cnki": case "iciba":
+      return translateEncryptedWebService(text, id, fetchTranslation);
     case "deeplx": {
       const requestID = 1000 * (Math.floor(Math.random() * 99999) + 8300000) + 1;
       const res = await post(
