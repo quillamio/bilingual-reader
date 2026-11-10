@@ -30,10 +30,28 @@
 <groupbox id="bilingualreader-builtin-section">
   <label><html:h3>内置免费翻译</html:h3></label>
   <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
-    不需要 API Key 或安装其他翻译插件，但必须联网。Google / Bing 使用非官方网页翻译接口，
-    可能受地区访问、服务变更和频率限制影响，并非承诺永久免费或稳定。
-    文献正文会发送至选定的翻译提供商。内置服务默认单段请求、串行运行，避免合并段落造成译文错位。
-    如果 Google 不可用，可以手动切换备用入口、Bing 或其他后端。
+    内置翻译服务独立运行，不再依赖 Translate for Zotero。可选择免密钥网页翻译、商业 API 和自托管模型。
+    文献正文将发送至所选在线服务（本地服务除外），免费网页接口并非官方保证稳定的 API；
+    对敏感或未发表资料建议使用本地 Ollama。内置服务为保证段落对应关系逐段翻译。
+  </html:p>
+</groupbox>
+
+<groupbox id="bilingualreader-service-config-section">
+  <label><html:h3>所选引擎的独立配置</html:h3></label>
+  <html:p id="bilingualreader-service-config-hint" style="line-height: 1.6; margin: 0 0 8px 0">
+    切换上方引擎后，在这里输入专属 API Key、模型或服务地址。设置保存在本地 Zotero 偏好配置中。
+  </html:p>
+  <html:div id="bilingualreader-service-fields" style="display: flex; flex-direction: column; gap: 8px; max-width: 760px;"></html:div>
+  <hbox align="center" style="margin-top: 12px">
+    <html:button id="bilingualreader-test-service" type="button" style="padding: 5px 12px">
+      测试此服务（实际发送短句，可能产生费用）
+    </html:button>
+    <html:span style="margin-left: 10px; max-width: 550px">
+      注意：API Key 存在 Zotero 本地偏好中，非系统钥匙串；请勿共享包含凭据的 Zotero 配置。
+    </html:span>
+  </hbox>
+  <html:p style="line-height: 1.6; margin: 8px 0 0 0; max-width: 760px">
+    词典类（Cambridge、Bing Dict 等）不支持完整论文段落；Pot 只提供弹窗。CNKI 和 Iciba 的特殊网页验证接口暂不支持。
   </html:p>
 </groupbox>
 
@@ -92,7 +110,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 2。内置 Google/Bing 为保护免费接口自动使用串行请求；此处并发设置适用于兼容后端。</html:span
+      >默认 2。免密钥网页引擎强制单并发；API 和自托管引擎使用配置的并发数。</html:span
     >
   </hbox>
 
@@ -109,7 +127,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 250。Google 内置引擎最少间隔 750 毫秒，Bing 最少间隔 300 毫秒；遭遇限流可适当增加。</html:span
+      >默认 250。免密钥网页服务至少间隔 750 毫秒（Bing 为 300 毫秒）；遇到限流可调高。</html:span
     >
   </hbox>
 
@@ -143,7 +161,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 6。仅兼容后端使用多段合并；内置 Google/Bing 始终逐段翻译。设为 1
+      >默认 6。仅兼容后端和 Ollama 使用多段合并；所有内置引擎逐段翻译。设为 1
       可关闭合并。</html:span
     >
   </hbox>
