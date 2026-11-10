@@ -96,7 +96,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
     ] },
   ] },
   { id: "youdaozhiyunllm", label: "有道智云大模型翻译", group: "api", fields: [
-    key("AppID#AppSecret"), { key: "domain", label: "领域提示（可选）", defaultValue: "medicine" },
+    key("AppID#AppSecret"), model("0"), prompt,
   ] },
   { id: "libretranslate", label: "LibreTranslate 自托管", group: "local", fields: [
     endpoint("http://127.0.0.1:5000", true), { key: "secret", label: "API Key（可选）", type: "password" },
