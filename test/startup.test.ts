@@ -428,6 +428,36 @@ describe("startup", function () {
     }
   });
 
+  it("should parse Youdao LLM SSE after signing its request", async function () {
+    this.timeout(10000);
+    const id = "youdaozhiyunllm";
+    const secretPref = "extensions.zotero.bilingualreader.services." + id + ".secret";
+    const revisionPref = "extensions.zotero.bilingualreader.services." + id + ".revision";
+    const previousSecret = Zotero.Prefs.get(secretPref, true);
+    const previousRevision = Zotero.Prefs.get(revisionPref, true);
+    const previousRequest = Zotero.HTTP.request;
+    try {
+      updateServiceSettings(id, { secret: "mock-appid#mock-secret" });
+      (Zotero.HTTP as any).request = async (_method: string, url: string) => {
+        assert.include(url, "openapi.youdao.com/llm_trans?");
+        return {
+          status: 200,
+          response: "event: message\ndata: {\"transFull\":\"有道模拟译文。\"}\n\n",
+        };
+      };
+      assert.equal(
+        await translateNativeParagraph("A medical paper paragraph.", id),
+        "有道模拟译文。",
+      );
+    } finally {
+      (Zotero.HTTP as any).request = previousRequest;
+      if (previousSecret === undefined) Zotero.Prefs.clear(secretPref, true);
+      else Zotero.Prefs.set(secretPref, previousSecret, true);
+      if (previousRevision === undefined) Zotero.Prefs.clear(revisionPref, true);
+      else Zotero.Prefs.set(revisionPref, previousRevision, true);
+    }
+  });
+
   it("should translate through the selected Ollama engine", async function () {
     this.timeout(10000);
     const enginePref = "extensions.zotero.bilingualreader.engine";
