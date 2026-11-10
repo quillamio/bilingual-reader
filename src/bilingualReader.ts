@@ -242,7 +242,7 @@ async function translateText(
   }
   if (isBuiltInEngine(engine)) {
     const translated = await translateWithBuiltIn(text, engine);
-    return { text: translated, engineTag: getCacheEngineTag() };
+    return { text: translated, engineTag: `builtin:${engine}:en:zh-CN` };
   }
   return translateWithPDFTranslate(text, itemID);
 }
