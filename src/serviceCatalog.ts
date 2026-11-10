@@ -37,6 +37,8 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
   { id: "tencenttransmart", label: "腾讯 Transmart（网页）", group: "free", fields: [] },
   { id: "mymemory", label: "MyMemory", group: "free", fields: [{ key: "email", label: "邮箱（可选，提高额度）" }] },
   { id: "deeplx", label: "DeepL 网页（非官方）", group: "free", fields: [endpoint("https://www2.deepl.com/jsonrpc")] },
+  { id: "cnki", label: "知网 CNKI 学术翻译（非官方）", group: "free", fields: [] },
+  { id: "iciba", label: "金山词霸网页翻译（非官方）", group: "free", fields: [] },
   { id: "baidu", label: "百度翻译", group: "api", fields: [key("AppID#密钥#Action（Action 可省略）")] },
   { id: "baidufield", label: "百度领域翻译", group: "api", fields: [key("AppID#密钥#领域代码")] },
   { id: "caiyun", label: "彩云小译", group: "api", fields: [key("彩云 Token")] },
@@ -118,7 +120,7 @@ export const DICTIONARY_ONLY_SERVICES: readonly string[] = [
   "Gramota Dictionary", "海词词典", "金山词霸", "Weblio", "有道词典",
 ];
 export const NON_PARAGRAPH_SERVICES: readonly string[] = [
-  "Pot（仅外部弹窗）", "CNKI（网页验证机制未完成适配）", "Iciba（加密网页接口未完成适配）",
+  "Pot（仅外部弹窗；不返回段落译文）",
 ];
 const SERVICE_MAP = new Map(SERVICE_CATALOG.map((service) => [service.id, service]));
 export function getServiceDefinition(id: string): ServiceDefinition | undefined {
