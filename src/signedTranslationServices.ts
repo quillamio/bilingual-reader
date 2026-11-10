@@ -182,8 +182,8 @@ async function youdaoSigned(text: string, id: string, fetch: Fetcher): Promise<s
   });
   if (isLLM) {
     query.set("streamType", "full");
-    query.set("handleOption", "0");
-    query.set("prompt", setting(id, "domain"));
+    query.set("handleOption", setting(id, "model"));
+    query.set("prompt", setting(id, "prompt"));
     const res = await fetch("POST", "https://openapi.youdao.com/llm_trans?" + query.toString(),
       "", { "Content-Type": "application/x-www-form-urlencoded" }, "text");
     if (typeof res !== "string") throw new Error("有道大模型接口响应格式变化。");
