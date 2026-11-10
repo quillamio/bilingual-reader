@@ -1,6 +1,8 @@
+import { isManagedService, getServiceRevision } from "./serviceCatalog";
+
 const BASE = "extensions.zotero.bilingualreader";
 
-export type TranslationEngine = "google" | "googleapi" | "bing" | "pdftranslate" | "ollama";
+export type TranslationEngine = string;
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
@@ -46,16 +48,9 @@ function setNumberPref(key: string, value: number, min: number, max: number): vo
 
 export function getEngine(): TranslationEngine {
   const value = getStringPref(ENGINE_PREF, "google");
-  if (
-    value === "google" ||
-    value === "googleapi" ||
-    value === "bing" ||
-    value === "pdftranslate" ||
-    value === "ollama"
-  ) {
-    return value;
-  }
-  return "google";
+  return value === "ollama" || value === "pdftranslate" || isManagedService(value)
+    ? value
+    : "google";
 }
 
 export function setEngine(engine: TranslationEngine): void {
@@ -153,6 +148,9 @@ export function getCacheEngineTag(actualPDFTranslateService?: string): string {
   }
   if (engine === "google" || engine === "googleapi" || engine === "bing") {
     return `builtin:${engine}:en:zh-CN`;
+  }
+  if (isManagedService(engine)) {
+    return `native:${engine}:revision:${getServiceRevision(engine)}:en:zh-CN`;
   }
   return `pdftranslate:${
     actualPDFTranslateService || getResolvedPDFTranslateService() || "default"
