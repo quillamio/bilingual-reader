@@ -3,6 +3,14 @@ import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
 import { clearTranslationCache } from "../src/translationCache";
+import {
+  SERVICE_CATALOG, getServiceSetting, updateServiceSettings,
+} from "../src/serviceCatalog";
+import { translateNativeParagraph } from "../src/nativeTranslation";
+import {
+  parseBingTranslation,
+  parseGoogleTranslation,
+} from "../src/builtInTranslationServices";
 
 describe("startup", function () {
   it("should have plugin instance defined", function () {
@@ -38,18 +46,20 @@ describe("startup", function () {
         "bilingualreader-skip-last-pages",
       ) as HTMLInputElement | null;
 
-      assert.deepEqual(
-        Array.from(engine?.options || []).map((option) => option.value),
-        ["pdftranslate", "ollama"],
-      );
-      assert.equal(engine?.value, "pdftranslate");
+      const available = Array.from(engine?.options || []).map((option) => option.value);
+      assert.equal(available.length, SERVICE_CATALOG.length + 2);
+      for (const required of ["google", "bing", "deeplfree", "gemini", "claude",
+        "qwenmt", "libretranslate", "mtranserver", "pdftranslate", "ollama"]) {
+        assert.include(available, required);
+      }
+      assert.exists(win?.document.getElementById("bilingualreader-service-config-section"));
+      assert.include(["google", "googleapi", "bing", "pdftranslate", "ollama"], engine?.value);
       assert.equal(skipLastPages?.value, "1");
-      assert.equal(
+      assert.include(
         win?.document
           .getElementById("bilingualreader-introduction")
-          ?.textContent?.replace(/\s+/gu, " ")
-          .trim(),
-        "在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for Zotero（推荐使用google，其次必应）；Ollama 作为可选后端保留。",
+          ?.textContent?.replace(/\s+/gu, " ") || "",
+        "内置 Google 翻译默认免 API Key",
       );
       assert.notExists(win?.document.getElementById("bilingualreader-pdftranslate-service"));
       assert.include(
@@ -195,6 +205,256 @@ describe("startup", function () {
       } else {
         Zotero.Prefs.set(obsoleteServicePref, previousObsoleteService, true);
       }
+    }
+  });
+
+  it("should parse built-in translation responses without accepting empty results", function () {
+    assert.equal(parseGoogleTranslation([[["译文一", "first"], ["译文二", "second"]]]), "译文一译文二");
+    assert.equal(
+      parseBingTranslation([{ translations: [{ text: "必应译文" }] }]),
+      "必应译文",
+    );
+    assert.throws(() => parseGoogleTranslation({ error: "changed" }), /Google/u);
+    assert.throws(() => parseBingTranslation([]), /Bing/u);
+  });
+
+  it("should translate directly via Google without Translate for Zotero", async function () {
+    this.timeout(10000);
+    const prefKey = "extensions.zotero.bilingualreader.engine";
+    const previousEngine = Zotero.Prefs.get(prefKey, true);
+    const previousPDFTranslate = (Zotero as any).PDFTranslate;
+    const previousRequest = Zotero.HTTP.request;
+    let requestURL = "";
+    let shownError = "";
+
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("google-test");
+    const content = doc.createElement("div");
+    content.id = "sdt-content";
+    const paragraph = doc.createElement("p");
+    paragraph.dataset.refPath = "0";
+    paragraph.textContent = `A synthetic Google paragraph ${Date.now()}.`;
+    content.append(paragraph);
+    doc.body.append(content);
+
+    const reader = {
+      itemID: 2147483632,
+      _iframeWindow: { alert: (message: string) => { shownError = message; } },
+      _internalReader: {
+        _lastViewPrimary: true,
+        _primarySDTView: {
+          _iframeDocument: doc,
+          getData: () => ({ structure: null }),
+        },
+      },
+    };
+
+    try {
+      Zotero.Prefs.set(prefKey, "google", true);
+      (Zotero as any).PDFTranslate = undefined;
+      (Zotero.HTTP as any).request = async (method: string, url: string) => {
+        assert.equal(method, "GET");
+        requestURL = url;
+        return {
+          status: 200,
+          response: [[["内置 Google 翻译成功。", "source text"]]],
+        };
+      };
+
+      await toggleBilingualReading(reader);
+      assert.include(requestURL, "https://translate.google.com/translate_a/single?");
+      assert.include(requestURL, "client=gtx");
+      assert.include(requestURL, "tl=zh-CN");
+      assert.equal(shownError, "");
+      assert.equal(
+        doc.querySelector(".bilingual-reader-translation")?.textContent,
+        "内置 Google 翻译成功。",
+      );
+    } finally {
+      await toggleBilingualReading(reader);
+      clearTranslationCache();
+      (Zotero.HTTP as any).request = previousRequest;
+      (Zotero as any).PDFTranslate = previousPDFTranslate;
+      if (previousEngine === undefined) Zotero.Prefs.clear(prefKey, true);
+      else Zotero.Prefs.set(prefKey, previousEngine, true);
+    }
+  });
+
+  it("should isolate per-provider credentials and detect missing API keys", async function () {
+    const id = "customgpt3";
+    const otherId = "customgpt2";
+    const keyPref = "extensions.zotero.bilingualreader.services." + id + ".secret";
+    const versionPref = "extensions.zotero.bilingualreader.services." + id + ".revision";
+    const oldKey = Zotero.Prefs.get(keyPref, true);
+    const oldVersion = Zotero.Prefs.get(versionPref, true);
+    try {
+      const previousOther = getServiceSetting(otherId, "secret");
+      updateServiceSettings(id, { secret: "mock-credential-for-test" });
+      assert.equal(getServiceSetting(id, "secret"), "mock-credential-for-test");
+      assert.equal(getServiceSetting(otherId, "secret"), previousOther);
+      assert.isAbove(Number(Zotero.Prefs.get(versionPref, true)), Number(oldVersion || 0));
+    } finally {
+      if (oldKey === undefined) Zotero.Prefs.clear(keyPref, true);
+      else Zotero.Prefs.set(keyPref, oldKey, true);
+      if (oldVersion === undefined) Zotero.Prefs.clear(versionPref, true);
+      else Zotero.Prefs.set(versionPref, oldVersion, true);
+    }
+  });
+
+  it("should call Youdao without another translation plugin", async function () {
+    const priorRequest = Zotero.HTTP.request;
+    const previousPDFTranslate = (Zotero as any).PDFTranslate;
+    let url = "";
+    let requestBody = "";
+    try {
+      (Zotero as any).PDFTranslate = undefined;
+      (Zotero.HTTP as any).request = async (method: string, endpoint: string, options: any) => {
+        assert.equal(method, "POST");
+        url = endpoint;
+        requestBody = options.body;
+        return { status: 200, response: { errorCode: "0", translation: ["测试译文。"] } };
+      };
+      const translated = await translateNativeParagraph("The patient was treated.", "youdao");
+      assert.equal(translated, "测试译文。");
+      assert.equal(url, "https://aidemo.youdao.com/trans");
+      assert.include(requestBody, "from=en");
+      assert.include(requestBody, "to=zh-CHS");
+    } finally {
+      (Zotero.HTTP as any).request = priorRequest;
+      (Zotero as any).PDFTranslate = previousPDFTranslate;
+    }
+  });
+
+  it("should parse an independently configured OpenAI-compatible provider", async function () {
+    const id = "customgpt1";
+    const names = ["secret", "endpoint", "model", "revision"];
+    const oldPrefs = names.map((name) =>
+      Zotero.Prefs.get("extensions.zotero.bilingualreader.services." + id + "." + name, true),
+    );
+    const priorRequest = Zotero.HTTP.request;
+    let authorization = "";
+    let requestedModel = "";
+    try {
+      updateServiceSettings(id, {
+        secret: "mock-secret-not-real",
+        endpoint: "https://example.invalid/v1/chat/completions",
+        model: "mock-model",
+      });
+      (Zotero.HTTP as any).request = async (method: string, url: string, options: any) => {
+        assert.equal(method, "POST");
+        assert.equal(url, "https://example.invalid/v1/chat/completions");
+        authorization = options.headers.Authorization;
+        requestedModel = JSON.parse(options.body).model;
+        return {
+          status: 200,
+          response: { choices: [{ message: { content: "模拟翻译成功" } }] },
+        };
+      };
+      assert.equal(await translateNativeParagraph("A sample.", id), "模拟翻译成功");
+      assert.equal(authorization, "Bearer mock-secret-not-real");
+      assert.equal(requestedModel, "mock-model");
+    } finally {
+      (Zotero.HTTP as any).request = priorRequest;
+      names.forEach((name, index) => {
+        const pref = "extensions.zotero.bilingualreader.services." + id + "." + name;
+        if (oldPrefs[index] === undefined) Zotero.Prefs.clear(pref, true);
+        else Zotero.Prefs.set(pref, oldPrefs[index], true);
+      });
+    }
+  });
+
+  it("should render independent per-service input fields on selection", async function () {
+    this.timeout(10000);
+    const win = Zotero.Utilities.Internal.openPreferences("bilingual-reader-preferences");
+    assert.exists(win);
+    try {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (win?.document.getElementById("bilingualreader-engine")) break;
+        await Zotero.Promise.delay(50);
+      }
+      const selector = win!.document.getElementById("bilingualreader-engine") as HTMLSelectElement;
+      selector.value = "gemini";
+      selector.dispatchEvent(new win!.Event("change"));
+      const secret = win!.document.getElementById(
+        "bilingualreader-service-field-secret",
+      ) as HTMLInputElement;
+      const endpoint = win!.document.getElementById(
+        "bilingualreader-service-field-endpoint",
+      ) as HTMLInputElement;
+      assert.equal(secret.type, "password");
+      assert.include(endpoint.value, "generativelanguage.googleapis.com");
+      selector.value = "libretranslate";
+      selector.dispatchEvent(new win!.Event("change"));
+      assert.equal(
+        (win!.document.getElementById(
+          "bilingualreader-service-field-endpoint",
+        ) as HTMLInputElement).value,
+        "http://127.0.0.1:5000",
+      );
+      selector.value = "youdao";
+      selector.dispatchEvent(new win!.Event("change"));
+      assert.equal(
+        win!.document.getElementById("bilingualreader-service-fields")?.children.length,
+        0,
+      );
+    } finally {
+      win?.close();
+    }
+  });
+
+  it("should perform CNKI encryption and token exchange without PDFTranslate", async function () {
+    this.timeout(10000);
+    const previousRequest = Zotero.HTTP.request;
+    const previousPDFTranslate = (Zotero as any).PDFTranslate;
+    const requests: string[] = [];
+    try {
+      (Zotero as any).PDFTranslate = undefined;
+      (Zotero.HTTP as any).request = async (method: string, url: string, options: any) => {
+        requests.push(url);
+        if (url.includes("/getToken")) {
+          assert.equal(method, "GET");
+          return { status: 200, response: { code: 200, data: "mock-cnki-token" } };
+        }
+        assert.equal(options.headers.Token, "mock-cnki-token");
+        const requestBody = JSON.parse(options.body);
+        assert.isString(requestBody.words);
+        assert.notInclude(requestBody.words, "Clinical outcome");
+        return { status: 200, response: { data: { mResult: "临床结局。" } } };
+      };
+      assert.equal(await translateNativeParagraph("Clinical outcome", "cnki"), "临床结局。");
+      assert.equal(requests.length, 2);
+    } finally {
+      (Zotero.HTTP as any).request = previousRequest;
+      (Zotero as any).PDFTranslate = previousPDFTranslate;
+    }
+  });
+
+  it("should parse Youdao LLM SSE after signing its request", async function () {
+    this.timeout(10000);
+    const id = "youdaozhiyunllm";
+    const secretPref = "extensions.zotero.bilingualreader.services." + id + ".secret";
+    const revisionPref = "extensions.zotero.bilingualreader.services." + id + ".revision";
+    const previousSecret = Zotero.Prefs.get(secretPref, true);
+    const previousRevision = Zotero.Prefs.get(revisionPref, true);
+    const previousRequest = Zotero.HTTP.request;
+    try {
+      updateServiceSettings(id, { secret: "mock-appid#mock-secret" });
+      (Zotero.HTTP as any).request = async (_method: string, url: string) => {
+        assert.include(url, "openapi.youdao.com/llm_trans?");
+        return {
+          status: 200,
+          response: "event: message\ndata: {\"transFull\":\"有道模拟译文。\"}\n\n",
+        };
+      };
+      assert.equal(
+        await translateNativeParagraph("A medical paper paragraph.", id),
+        "有道模拟译文。",
+      );
+    } finally {
+      (Zotero.HTTP as any).request = previousRequest;
+      if (previousSecret === undefined) Zotero.Prefs.clear(secretPref, true);
+      else Zotero.Prefs.set(secretPref, previousSecret, true);
+      if (previousRevision === undefined) Zotero.Prefs.clear(revisionPref, true);
+      else Zotero.Prefs.set(revisionPref, previousRevision, true);
     }
   });
 

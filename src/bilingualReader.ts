@@ -30,6 +30,9 @@ import {
   type BatchInput,
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
+import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
+import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
+import { translateNativeParagraph } from "./nativeTranslation";
 import { cleanupReadingLayout, observeReadingLayout } from "./readingLayout";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
@@ -174,7 +177,7 @@ async function translateWithPDFTranslate(
     throw new Error(result || "Translate for Zotero 未返回译文，请检查翻译服务配置或网络状态。");
   }
   const actualService = String(task?.service || "").trim();
-  return { text: result, engineTag: getCacheEngineTag(actualService) };
+  return { text: result, engineTag: getCacheEngineTag(actualService, "pdftranslate") };
 }
 
 async function translateWithOllama(text: string): Promise<TranslationResponse> {
@@ -228,7 +231,7 @@ async function translateWithOllama(text: string): Promise<TranslationResponse> {
   if (!result || typeof result !== "string") {
     throw new Error("Ollama 未返回有效译文。请确认 Ollama 已启动、模型名称正确并可正常运行。");
   }
-  return { text: result.trim(), engineTag: getCacheEngineTag() };
+  return { text: result.trim(), engineTag: getCacheEngineTag(undefined, "ollama") };
 }
 
 async function translateText(
@@ -238,6 +241,12 @@ async function translateText(
 ): Promise<TranslationResponse> {
   if (engine === "ollama") {
     return translateWithOllama(text);
+  }
+  if (isManagedService(engine)) {
+    const translated = isBuiltInEngine(engine)
+      ? await translateWithBuiltIn(text, engine)
+      : await translateNativeParagraph(text, engine);
+    return { text: translated, engineTag: getCacheEngineTag(undefined, engine) };
   }
   return translateWithPDFTranslate(text, itemID);
 }
@@ -617,10 +626,13 @@ async function translateParagraphs(
   engineTag: string,
 ): Promise<void> {
   const maxErrors = getMaxConsecutiveErrors();
-  const requestGapMs = getRequestGapMs();
+  const freeService = getServiceDefinition(engine)?.group === "free";
+  const requestGapMs = freeService
+    ? Math.max(engine === "bing" ? 300 : 750, getRequestGapMs())
+    : getRequestGapMs();
   const requestTimeoutMs = getRequestTimeoutMs();
   const configuredConcurrent = getMaxConcurrent();
-  const concurrency = engine === "ollama" ? 1 : configuredConcurrent;
+  const concurrency = engine === "ollama" || freeService ? 1 : configuredConcurrent;
   const pendingIndexes = paragraphs
     .map((paragraph, index) => (paragraph.translation ? -1 : index))
     .filter((index) => index >= 0);
@@ -644,7 +656,12 @@ async function translateParagraphs(
     paragraphIndex,
     text: paragraphs[paragraphIndex].sourceText,
   }));
-  const jobs = packBatchItems(jobItems, getMaxCharsPerRequest(), getMaxBatchParagraphs());
+  // Free web endpoints may modify the BRSEG markers: translate one paragraph at a time.
+  const jobs = packBatchItems(
+    jobItems,
+    getMaxCharsPerRequest(),
+    isManagedService(engine) ? 1 : getMaxBatchParagraphs(),
+  );
 
   let cursor = 0;
   let completed = 0;
@@ -725,7 +742,7 @@ async function translateParagraphs(
             itemKey,
             paragraph.sourceText,
             response.text,
-            response.engineTag || engineTag,
+            engine === "pdftranslate" ? response.engineTag || engineTag : engineTag,
             isFailureText,
           );
 
@@ -794,7 +811,8 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
   }
 
   const engine = getEngine();
-  const engineTag = getCacheEngineTag();
+  if (isManagedService(engine)) assertServiceConfigured(engine);
+  const engineTag = getCacheEngineTag(undefined, engine);
   const structure = getSDTStructure(reader);
   const paragraphs = collectParagraphs(doc, itemKey, engineTag, structure);
   if (!paragraphs.length) {
@@ -884,12 +902,18 @@ export function configureTranslation(reader: any): void {
 
   const currentEngine = getEngine();
   const answer = win.prompt(
-    "快速切换翻译后端：\n1 = Translate for Zotero（推荐）\n2 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
-    currentEngine === "ollama" ? "2" : "1",
+    "快速切换翻译后端:\n1 = Google 翻译（免 API Key，默认）\n2 = Bing 翻译（免 API Key）\n3 = Translate for Zotero\n4 = Ollama\n\n完整设置请前往 Zotero 设置 → 中英对照。",
+    currentEngine === "google"
+      ? "1"
+      : currentEngine === "bing"
+        ? "2"
+        : currentEngine === "pdftranslate"
+          ? "3"
+          : "4",
   );
   if (answer === null) return;
 
-  if (String(answer).trim() === "2") {
+  if (String(answer).trim() === "4") {
     const url = win.prompt("Ollama 地址：", getOllamaURL() || DEFAULT_OLLAMA_URL);
     if (url === null) return;
 
@@ -906,8 +930,11 @@ export function configureTranslation(reader: any): void {
     return;
   }
 
-  setEngine("pdftranslate");
-  win.alert?.("已切换为 Translate for Zotero，并跟随其当前默认服务。点击 🔄 即可重试。");
+  const choice = String(answer).trim();
+  const selectedEngine: TranslationEngine =
+    choice === "2" ? "bing" : choice === "3" ? "pdftranslate" : "google";
+  setEngine(selectedEngine);
+  win.alert?.("翻译后端已更新。点击 🔄 即可重新翻译。");
 }
 
 function createToolbarButton(

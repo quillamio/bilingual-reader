@@ -31,6 +31,15 @@ import {
   type TranslationEngine,
 } from "../settings";
 import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
+import {
+  SERVICE_CATALOG,
+  getServiceDefinition,
+  getServiceSetting,
+  updateServiceSettings,
+  isManagedService,
+  type ServiceField,
+} from "../serviceCatalog";
+import { translateNativeParagraph } from "../nativeTranslation";
 
 const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
 
@@ -47,8 +56,134 @@ function updateBackendVisibility(doc: Document): void {
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const pdfSection = getElement<HTMLElement>(doc, "bilingualreader-pdftranslate-section");
   const ollamaSection = getElement<HTMLElement>(doc, "bilingualreader-ollama-section");
+  const builtInSection = getElement<HTMLElement>(doc, "bilingualreader-builtin-section");
   if (pdfSection) pdfSection.hidden = engine !== "pdftranslate";
   if (ollamaSection) ollamaSection.hidden = engine !== "ollama";
+  if (builtInSection) builtInSection.hidden = !engine || !isManagedService(engine);
+  const configSection = getElement<HTMLElement>(doc, "bilingualreader-service-config-section");
+  if (configSection) configSection.hidden = !engine || !isManagedService(engine);
+  renderServiceFields(doc, engine || "");
+}
+
+
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+function html(doc: Document, name: string): HTMLElement {
+  return doc.createElementNS(HTML_NS, name) as HTMLElement;
+}
+
+function renderServiceSelector(doc: Document): void {
+  const select = getElement<HTMLSelectElement>(doc, "bilingualreader-engine");
+  if (!select) return;
+  while (select.firstChild) select.removeChild(select.firstChild);
+  const names: Record<string, string> = {
+    free: "免 API Key（在线网页翻译）",
+    api: "商业 API（各自配置密钥）",
+    local: "自托管服务（指定本地地址）",
+  };
+  for (const group of ["free", "api", "local"]) {
+    const optgroup = html(doc, "optgroup") as HTMLOptGroupElement;
+    optgroup.label = names[group];
+    for (const service of SERVICE_CATALOG.filter((item) => item.group === group)) {
+      const option = html(doc, "option") as HTMLOptionElement;
+      option.value = service.id;
+      option.textContent = service.label;
+      optgroup.append(option);
+    }
+    select.append(optgroup);
+  }
+  const other = html(doc, "optgroup") as HTMLOptGroupElement;
+  other.label = "兼容 / 本地大语言模型";
+  for (const entry of [
+    { id: "pdftranslate", label: "Translate for Zotero（旧兼容模式）" },
+    { id: "ollama", label: "Ollama 本地 / 云端" },
+  ]) {
+    const option = html(doc, "option") as HTMLOptionElement;
+    option.value = entry.id;
+    option.textContent = entry.label;
+    other.append(option);
+  }
+  select.append(other);
+}
+
+function renderServiceFields(doc: Document, id: string): void {
+  const target = getElement<HTMLElement>(doc, "bilingualreader-service-fields");
+  const hint = getElement<HTMLElement>(doc, "bilingualreader-service-config-hint");
+  if (!target) return;
+  while (target.firstChild) target.removeChild(target.firstChild);
+  const definition = getServiceDefinition(id);
+  if (!definition) return;
+  if (hint) {
+    hint.textContent = definition.fields.length
+      ? "以下配置仅属于“" + definition.label + "”，不同引擎互不共享密钥、模型和地址。"
+      : definition.label + "无需额外配置，只要能够联网即可使用。";
+  }
+  target.dataset.service = id;
+  for (const field of definition.fields) {
+    const wrap = html(doc, "div");
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "12px";
+    const label = html(doc, "label") as HTMLLabelElement;
+    label.textContent = field.label;
+    label.style.minWidth = "210px";
+    label.style.maxWidth = "210px";
+    const elementId = "bilingualreader-service-field-" + field.key;
+    label.htmlFor = elementId;
+    let input: HTMLInputElement | HTMLSelectElement;
+    if (field.type === "select") {
+      const select = html(doc, "select") as HTMLSelectElement;
+      for (const optionSpec of field.options || []) {
+        const option = html(doc, "option") as HTMLOptionElement;
+        option.value = optionSpec.value;
+        option.textContent = optionSpec.label;
+        select.append(option);
+      }
+      input = select;
+    } else {
+      const textInput = html(doc, "input") as HTMLInputElement;
+      textInput.type = field.type === "password" ? "password" : "text";
+      textInput.autocomplete = "off";
+      input = textInput;
+    }
+    input.id = elementId;
+    input.style.flex = "1";
+    input.style.minWidth = "200px";
+    input.style.padding = "5px 6px";
+    input.value = getServiceSetting(id, field.key);
+    wrap.append(label, input);
+    target.append(wrap);
+  }
+}
+function readServiceFields(doc: Document, id: string): Record<string, string> {
+  const definition = getServiceDefinition(id);
+  if (!definition) return {};
+  const values: Record<string, string> = {};
+  for (const field of definition.fields) {
+    const input = getElement<HTMLInputElement | HTMLSelectElement>(
+      doc, "bilingualreader-service-field-" + field.key,
+    );
+    if (!input) throw new Error("缺少设置字段：" + field.label);
+    values[field.key] = input.value;
+  }
+  return values;
+}
+async function testSelectedService(doc: Document): Promise<void> {
+  const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value || "";
+  if (!isManagedService(engine)) return;
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-service");
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  try {
+    updateServiceSettings(engine, readServiceFields(doc, engine));
+    setStatus(doc, "已保存该服务配置；正在发送英文测试句...");
+    const result = await translateNativeParagraph("The patient received treatment.", engine);
+    setStatus(doc, "连接成功。测试译文：" + result.slice(0, 180));
+  } catch (error: any) {
+    setStatus(doc, "测试失败：" + (error?.message || "未知错误"));
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function readNumberInput(doc: Document, id: string, fallback: number): number {
@@ -59,13 +194,22 @@ function readNumberInput(doc: Document, id: string, fallback: number): number {
 
 function saveSettings(doc: Document): void {
   const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
-  const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
+  const engine: TranslationEngine =
+    engineValue && (isManagedService(engineValue) || engineValue === "ollama" || engineValue === "pdftranslate")
+      ? engineValue
+      : "google";
   const url =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url")?.value || DEFAULT_OLLAMA_URL;
   const model =
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
 
+  try {
+    if (isManagedService(engine)) updateServiceSettings(engine, readServiceFields(doc, engine));
+  } catch (error: any) {
+    setStatus(doc, "保存失败：" + (error?.message || "配置不完整"));
+    return;
+  }
   setEngine(engine);
   setOllamaURL(url);
   setOllamaModel(model);
@@ -204,6 +348,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
   const requestTimeout = getElement<HTMLInputElement>(doc, "bilingualreader-request-timeout");
 
+  renderServiceSelector(doc);
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
   if (model) model.value = getOllamaModel();
@@ -228,6 +373,11 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
     saveSettings(doc);
   });
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-test-service")?.addEventListener(
+    "click",
+    () => { void testSelectedService(doc); },
+  );
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-test-ollama")?.addEventListener(
     "click",
