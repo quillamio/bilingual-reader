@@ -4,6 +4,10 @@ import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
 import { clearTranslationCache } from "../src/translationCache";
 import {
+  SERVICE_CATALOG, getServiceSetting, updateServiceSettings,
+} from "../src/serviceCatalog";
+import { translateNativeParagraph } from "../src/nativeTranslation";
+import {
   parseBingTranslation,
   parseGoogleTranslation,
 } from "../src/builtInTranslationServices";
@@ -42,10 +46,13 @@ describe("startup", function () {
         "bilingualreader-skip-last-pages",
       ) as HTMLInputElement | null;
 
-      assert.deepEqual(
-        Array.from(engine?.options || []).map((option) => option.value),
-        ["google", "googleapi", "bing", "pdftranslate", "ollama"],
-      );
+      const available = Array.from(engine?.options || []).map((option) => option.value);
+      assert.equal(available.length, SERVICE_CATALOG.length + 2);
+      for (const required of ["google", "bing", "deeplfree", "gemini", "claude",
+        "qwenmt", "libretranslate", "mtranserver", "pdftranslate", "ollama"]) {
+        assert.include(available, required);
+      }
+      assert.exists(win?.document.getElementById("bilingualreader-service-config-section"));
       assert.include(["google", "googleapi", "bing", "pdftranslate", "ollama"], engine?.value);
       assert.equal(skipLastPages?.value, "1");
       assert.include(
