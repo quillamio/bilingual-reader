@@ -1,6 +1,6 @@
 const BASE = "extensions.zotero.bilingualreader";
 
-export type TranslationEngine = "pdftranslate" | "ollama";
+export type TranslationEngine = "google" | "googleapi" | "bing" | "pdftranslate" | "ollama";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
@@ -45,7 +45,17 @@ function setNumberPref(key: string, value: number, min: number, max: number): vo
 }
 
 export function getEngine(): TranslationEngine {
-  return getStringPref(ENGINE_PREF, "pdftranslate") === "ollama" ? "ollama" : "pdftranslate";
+  const value = getStringPref(ENGINE_PREF, "google");
+  if (
+    value === "google" ||
+    value === "googleapi" ||
+    value === "bing" ||
+    value === "pdftranslate" ||
+    value === "ollama"
+  ) {
+    return value;
+  }
+  return "google";
 }
 
 export function setEngine(engine: TranslationEngine): void {
@@ -137,8 +147,12 @@ export function getResolvedPDFTranslateService(): string {
 }
 
 export function getCacheEngineTag(actualPDFTranslateService?: string): string {
-  if (getEngine() === "ollama") {
+  const engine = getEngine();
+  if (engine === "ollama") {
     return `ollama:${getOllamaURL()}:${getOllamaModel()}`;
+  }
+  if (engine === "google" || engine === "googleapi" || engine === "bing") {
+    return `builtin:${engine}:en:zh-CN`;
   }
   return `pdftranslate:${
     actualPDFTranslateService || getResolvedPDFTranslateService() || "default"
