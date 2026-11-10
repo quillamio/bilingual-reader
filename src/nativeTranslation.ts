@@ -121,7 +121,7 @@ async function gptTranslate(text: string, id: string): Promise<string> {
   const payload: any = isResponses
     ? { model: setting(id, "model"), input: messages, stream: false }
     : { model: setting(id, "model"), messages, stream: false };
-  const headers = isAzure
+  const headers: Headers = isAzure
     ? { "api-key": setting(id, "secret") }
     : { Authorization: "Bearer " + setting(id, "secret") };
   const response = await post(url, payload, headers);
