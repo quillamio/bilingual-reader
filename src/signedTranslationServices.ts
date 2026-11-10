@@ -188,7 +188,7 @@ async function youdaoSigned(text: string, id: string, fetch: Fetcher): Promise<s
       "", { "Content-Type": "application/x-www-form-urlencoded" }, "text");
     if (typeof res !== "string") throw new Error("有道大模型接口响应格式变化。");
     const events = res.split(/\n\n+/);
-    const payload = events.filter((e) => e.includes("event:message")).flatMap((entry) => {
+    const payload = events.filter((e) => /event:\s*message\b/u.test(e)).flatMap((entry) => {
       const raw = entry.split("\n").find((line) => line.startsWith("data:"));
       if (!raw) return [];
       try { return [JSON.parse(raw.slice(5).trim()).transFull || ""]; } catch (_) { return []; }
