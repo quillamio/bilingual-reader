@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.5.2
+
+- 修复长论文标题导致双语导出的 PDF 文件名被截断并丢失 `.pdf` 扩展名的问题，确保 Windows 可按 PDF 类型识别附件。
+- 改为使用带有 `.pdf` 后缀的短临时文件名，通过 Zotero 附件导入 API 安全生成完整双语 PDF 附件名称，并明确 MIME 类型为 `application/pdf`。
+- 等待打印输出稳定，导入前检查 PDF 文件头与结束标记，避免将未完成或明显损坏的文件保存为附件。
+- 加入包含长英文标题、中文、Emoji、Windows 特殊字符和不完整 PDF 的自动化回归测试。
+- 为 Zotero 10 的文件末尾读取使用 Firefox/XPCOM 文件流接口，降低插件运行环境不暴露 `IOUtils` 或 `OS.File` 时导出失败的风险。
+- 版本安装包由 GitHub Actions 在通过代码检查、Linux/macOS 构建与 Zotero 插件测试后发布；Windows 实机导出仍需用户反馈验证。
+
+
 ## v0.5.0
 
 - 设置页与 README 更新 Translate for Zotero 服务建议：推荐使用 google，其次使用必应。

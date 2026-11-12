@@ -1,8 +1,11 @@
 /** Filename and PDF signature checks for Zotero's bilingual PDF export. */
 export function sanitizeExportFileBaseName(value: string, maxBytes = 180): string {
-  const cleaned = value
-    .replace(/\.pdf$/i, "")
-    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "_")
+  const safeCharacters = Array.from(value.replace(/\.pdf$/i, ""), (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 || '\\/:*?"<>|'.includes(character) ? "_" : character;
+  });
+  const cleaned = safeCharacters
+    .join("")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[. ]+$/g, "");
@@ -21,5 +24,9 @@ export function sanitizeExportFileBaseName(value: string, maxBytes = 180): strin
 }
 
 export function hasCompletePDFMarkers(header: string, tail: string): boolean {
-  return /^%PDF-\d\.\d/.test(header) && /%%EOF[\x00-\x20]*$/.test(tail);
+  if (!/^%PDF-\d\.\d/.test(header)) return false;
+  let last = tail.length - 1;
+  // PDF files can end in whitespace or padding bytes after %%EOF.
+  while (last >= 0 && tail.charCodeAt(last) <= 32) last -= 1;
+  return tail.slice(0, last + 1).endsWith("%%EOF");
 }

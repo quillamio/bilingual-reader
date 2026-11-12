@@ -203,28 +203,28 @@ ${root.outerHTML}
 async function readPDFMarkers(file: any): Promise<{ header: string; tail: string }> {
   const header = await (Zotero.File as any).getBinaryContentsAsync(file.path, 8);
   const bytesToRead = Math.min(file.fileSize, 4096);
-  let tailBytes: Uint8Array;
-
-  // Zotero 10 uses OS.File; newer Firefox runtimes can expose IOUtils.
-  const ioUtils = (globalThis as any).IOUtils;
-  if (ioUtils?.read) {
-    tailBytes = await ioUtils.read(file.path, {
-      offset: Math.max(0, file.fileSize - bytesToRead),
-      maxBytes: bytesToRead,
-    });
-  } else {
-    const osFile = (globalThis as any).OS?.File;
-    if (!osFile?.open) throw new Error("当前 Zotero 无法读取 PDF 输出文件末尾。");
-    const handle = await osFile.open(file.path, { read: true });
-    try {
-      await handle.setPosition(-bytesToRead, osFile.POS_END);
-      tailBytes = await handle.read(bytesToRead);
-    } finally {
-      await handle.close();
-    }
+  // Zotero 10 exposes the Firefox/XPCOM file-stream interfaces. Do not rely
+  // on OS.File or IOUtils being visible in the add-on's global scope.
+  const components = (globalThis as any).Components;
+  if (!components?.classes || !components?.interfaces) {
+    throw new Error("当前 Zotero 无法访问 PDF 文件读取接口。");
   }
-  const tail = Array.from(tailBytes, (byte) => String.fromCharCode(byte)).join("");
-  return { header, tail };
+  const stream = components.classes["@mozilla.org/network/file-input-stream;1"].createInstance(
+    components.interfaces.nsIFileInputStream,
+  );
+  stream.init(file, 0x01, 0, 0);
+  try {
+    stream
+      .QueryInterface(components.interfaces.nsISeekableStream)
+      .seek(components.interfaces.nsISeekableStream.NS_SEEK_END, -bytesToRead);
+    const binary = components.classes["@mozilla.org/binaryinputstream;1"].createInstance(
+      components.interfaces.nsIBinaryInputStream,
+    );
+    binary.setInputStream(stream);
+    return { header, tail: binary.readBytes(bytesToRead) };
+  } finally {
+    stream.close();
+  }
 }
 
 async function waitForGeneratedFile(file: any): Promise<void> {

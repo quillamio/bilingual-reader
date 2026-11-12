@@ -29,11 +29,13 @@ test("Windows filename characters, trailing dots, and device names", () => {
   assert.equal(sanitizeExportFileBaseName("CON"), "_CON");
   assert.equal(sanitizeExportFileBaseName("lpt9"), "_lpt9");
   assert.equal(sanitizeExportFileBaseName("   "), "中英对照翻译");
+  assert.equal(sanitizeExportFileBaseName("A\u0000B"), "A_B");
 });
 
 test("recognizes complete PDF header and EOF markers", () => {
   assert.equal(hasCompletePDFMarkers("%PDF-1.7\n", "startxref\n123\n%%EOF\n"), true);
   assert.equal(hasCompletePDFMarkers("%PDF-2.0\r", "%%EOF\r\n"), true);
+  assert.equal(hasCompletePDFMarkers("%PDF-1.7", "%%EOF\u0000\n"), true);
 });
 
 test("rejects HTML, missing EOF, and partially written output", () => {
