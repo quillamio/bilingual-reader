@@ -50,6 +50,7 @@ jobs:
     steps:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
+      - run: npm run test:unit
       - run: npm run test
 
   release:

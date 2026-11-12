@@ -1,3 +1,5 @@
+import { hasCompletePDFMarkers, sanitizeExportFileBaseName } from "./pdfExportUtils";
+
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
 const PRINTER_EMOJI = "🖨️";
@@ -74,16 +76,6 @@ function createToolbarEmojiButton(
     onClick(button);
   });
   return button;
-}
-
-function sanitizeFileName(value: string): string {
-  const chars = Array.from(value).map((character) => {
-    const code = character.charCodeAt(0);
-    if (code < 32 || '\\/:*?"<>|'.includes(character)) return "_";
-    return character;
-  });
-  const cleaned = chars.join("").replace(/\s+/g, " ").trim();
-  return (cleaned || "中英对照翻译").slice(0, 120);
 }
 
 function escapeHTML(value: string): string {
@@ -208,16 +200,62 @@ ${root.outerHTML}
 </html>`;
 }
 
+async function readPDFMarkers(file: any): Promise<{ header: string; tail: string }> {
+  const header = await (Zotero.File as any).getBinaryContentsAsync(file.path, 8);
+  const bytesToRead = Math.min(file.fileSize, 4096);
+  let tailBytes: Uint8Array;
+
+  // Zotero 10 uses OS.File; newer Firefox runtimes can expose IOUtils.
+  const ioUtils = (globalThis as any).IOUtils;
+  if (ioUtils?.read) {
+    tailBytes = await ioUtils.read(file.path, {
+      offset: Math.max(0, file.fileSize - bytesToRead),
+      maxBytes: bytesToRead,
+    });
+  } else {
+    const osFile = (globalThis as any).OS?.File;
+    if (!osFile?.open) throw new Error("当前 Zotero 无法读取 PDF 输出文件末尾。");
+    const handle = await osFile.open(file.path, { read: true });
+    try {
+      await handle.setPosition(-bytesToRead, osFile.POS_END);
+      tailBytes = await handle.read(bytesToRead);
+    } finally {
+      await handle.close();
+    }
+  }
+  const tail = Array.from(tailBytes, (byte) => String.fromCharCode(byte)).join("");
+  return { header, tail };
+}
+
 async function waitForGeneratedFile(file: any): Promise<void> {
+  let previousSize = 0;
+  let stableObservations = 0;
+  let sawOutput = false;
+
   for (let i = 0; i < 300; i++) {
     try {
-      if (file.exists() && file.fileSize > 0) return;
+      if (file.exists() && file.fileSize >= 32) {
+        sawOutput = true;
+        const currentSize = file.fileSize;
+        stableObservations = currentSize === previousSize ? stableObservations + 1 : 0;
+        previousSize = currentSize;
+
+        // Size alone does not prove the PDF has finished being written.
+        if (stableObservations >= 2) {
+          const { header, tail } = await readPDFMarkers(file);
+          if (hasCompletePDFMarkers(header, tail)) return;
+        }
+      }
     } catch (_) {
-      // The file may not exist until the print job finishes flushing.
+      // Printing may still be creating or flushing the file.
     }
     await Zotero.Promise.delay(100);
   }
-  throw new Error("PDF 打印任务已结束，但没有检测到有效的输出文件。");
+  throw new Error(
+    sawOutput
+      ? "PDF 文件头或结束标记无效，或打印任务未完成；已取消导入，避免保存损坏附件。"
+      : "PDF 打印任务已结束，但未检测到输出文件。",
+  );
 }
 
 async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<any> {
@@ -231,6 +269,8 @@ async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<
   const attachment = await (Zotero.Attachments as any).importFromFile({
     file: tempFile,
     parentItemID,
+    fileBaseName: sanitizeExportFileBaseName(`${parentTitle || "文献"} - 中英对照翻译`),
+    contentType: "application/pdf",
   });
   attachment.setField("title", `${parentTitle || "文献"} - 中英对照翻译`);
   await attachment.saveTx();
@@ -349,9 +389,9 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   const parentTitle = String(
     parentItem?.getField?.("title") || sourceAttachment.getField?.("title") || "文献",
   );
-  const fileName = sanitizeFileName(`${parentTitle} - 中英对照翻译.pdf`);
   const tempFile = Zotero.getTempDirectory();
-  tempFile.append(`bilingual-reader-${Date.now()}-${fileName}`);
+  // A stable .pdf suffix must not depend on the length of the article title.
+  tempFile.append(`bilingual-reader-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.pdf`);
 
   try {
     if (tempFile.exists()) tempFile.remove(false);
