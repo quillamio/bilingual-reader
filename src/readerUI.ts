@@ -1,4 +1,4 @@
-import { hasCompletePDFMarkers, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -98,11 +98,14 @@ function getTranslationStats(doc: Document): { done: number; unfinished: number 
   return { done, unfinished };
 }
 
-function buildExportHTML(doc: Document, title: string): string {
+export function buildExportHTML(doc: Document, title: string): string {
   const sourceRoot = doc.querySelector("#sdt-content") as HTMLElement | null;
   if (!sourceRoot) throw new Error("无法读取当前 Zotero 阅读模式正文。");
 
   const root = sourceRoot.cloneNode(true) as HTMLElement;
+  // Reflow only the export clone. The live SDT reader maintains its original
+  // viewport-relative geometry so highlights/annotations keep working.
+  normalizeExportContent(root);
   const unfinishedBlocks = Array.from(
     root.querySelectorAll(`.${TRANSLATION_CLASS}:not([data-state="done"])`),
   ) as HTMLElement[];
@@ -132,20 +135,55 @@ function buildExportHTML(doc: Document, title: string): string {
   html, body {
     background: #fff;
     color: #111;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
   }
   body {
-    margin: 0 auto;
-    max-width: 176mm;
+    overflow-wrap: anywhere;
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
       "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     font-size: 10.5pt;
     line-height: 1.55;
   }
+  /* The printable width is governed by @page margins, not Zotero's
+     on-screen SDT viewport. All exported text must reflow inside it. */
   #sdt-content {
-    width: auto !important;
-    max-width: none !important;
+    position: static !important;
+    transform: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     margin: 0 !important;
     padding: 0 !important;
+  }
+  #sdt-content :is(
+    p, h1, h2, h3, h4, h5, h6, div, section, article,
+    li, ul, ol, blockquote, aside, figcaption
+  ):not(figure *) {
+    position: static !important;
+    transform: none !important;
+    translate: none !important;
+    float: none !important;
+    left: auto !important;
+    right: auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    overflow-wrap: anywhere !important;
+  }
+  #sdt-content :is(p, li, blockquote, aside, figcaption):not(figure *) {
+    text-indent: 0 !important;
+    white-space: normal !important;
+  }
+  #sdt-content :is(ul, ol) {
+    padding-inline-start: 1.25em !important;
   }
   p, li, blockquote {
     orphans: 3;
@@ -179,6 +217,8 @@ function buildExportHTML(doc: Document, title: string): string {
     text-decoration: none;
   }
   .${TRANSLATION_CLASS} {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere !important;
     margin: 0.18em 0 0.7em !important;
     padding: 0.12em 0 0.12em 0.78em !important;
     border-left: 2.2pt solid #c7354a !important;
