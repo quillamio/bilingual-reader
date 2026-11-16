@@ -30,3 +30,45 @@ export function hasCompletePDFMarkers(header: string, tail: string): boolean {
   while (last >= 0 && tail.charCodeAt(last) <= 32) last -= 1;
   return tail.slice(0, last + 1).endsWith("%%EOF");
 }
+
+
+/**
+ * Normalize the *clone* of Zotero's SDT reading-mode content before print.
+ *
+ * Reading mode can attach viewport-relative positions, transforms, negative
+ * margins and fixed widths to semantic blocks. Those coordinates are valid
+ * inside Zotero's reflowed reader but can place the first characters outside
+ * the PDF printable area after the DOM is cloned into HiddenBrowser.
+ *
+ * Do not mutate the live reader DOM or the geometry of SVG/canvas/figures.
+ */
+export function normalizeExportContent(root: HTMLElement): void {
+  const blockSelector = [
+    "#sdt-content",
+    "p", "h1", "h2", "h3", "h4", "h5", "h6",
+    "div", "section", "article", "li", "ul", "ol",
+    "blockquote", "aside", "figcaption",
+  ].join(",");
+
+  const blocks = [root, ...Array.from(root.querySelectorAll(blockSelector))]
+    .filter((node): node is HTMLElement => node instanceof (root.ownerDocument.defaultView?.HTMLElement || HTMLElement));
+  for (const element of blocks) {
+    const style = element.style;
+    if (!style || !style.length) continue;
+    for (const prop of [
+      "position", "left", "right", "top", "bottom", "inset",
+      "transform", "translate", "float",
+      "width", "min-width", "max-width",
+      "margin-left", "margin-right",
+      "overflow", "overflow-x", "overflow-y",
+    ]) {
+      style.removeProperty(prop);
+    }
+    // A first-line text-indent copied from a viewport-aligned SDT block can
+    // also push the first characters outside of the printed page.
+    if (element.matches("p, li, blockquote, figcaption, aside")) {
+      style.removeProperty("text-indent");
+    }
+    if (!style.length) element.removeAttribute("style");
+  }
+}
