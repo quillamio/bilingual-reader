@@ -50,8 +50,10 @@ export function normalizeExportContent(root: HTMLElement): void {
     "blockquote", "aside", "figcaption",
   ].join(",");
 
-  const blocks = [root, ...Array.from(root.querySelectorAll(blockSelector))]
-    .filter((node): node is HTMLElement => node.nodeType === 1 && node.namespaceURI === "http://www.w3.org/1999/xhtml");
+  const blocks: HTMLElement[] = [root];
+  for (const node of Array.from(root.querySelectorAll<HTMLElement>(blockSelector))) {
+    if (node.namespaceURI === "http://www.w3.org/1999/xhtml") blocks.push(node);
+  }
   for (const element of blocks) {
     if (element.closest("figure, picture, svg, math") && !element.matches("figcaption")) {
       continue; // Keep positioned figure crops and scientific artwork intact.
