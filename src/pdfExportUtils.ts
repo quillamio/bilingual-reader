@@ -53,6 +53,9 @@ export function normalizeExportContent(root: HTMLElement): void {
   const blocks = [root, ...Array.from(root.querySelectorAll(blockSelector))]
     .filter((node): node is HTMLElement => node.nodeType === 1 && node.namespaceURI === "http://www.w3.org/1999/xhtml");
   for (const element of blocks) {
+    if (element.closest("figure, picture, svg, math") && !element.matches("figcaption")) {
+      continue; // Keep positioned figure crops and scientific artwork intact.
+    }
     const style = element.style;
     if (!style || !style.length) continue;
     for (const prop of [
