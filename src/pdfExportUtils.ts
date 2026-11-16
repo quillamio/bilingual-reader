@@ -51,7 +51,10 @@ export function normalizeExportContent(root: HTMLElement): void {
   ].join(",");
 
   const blocks: HTMLElement[] = [root];
-  for (const node of Array.from(root.querySelectorAll<HTMLElement>(blockSelector))) {
+  // Zotero's specialized DOM declarations can infer querySelectorAll elements
+  // as unknown. This mirrors the cast used in the reader's existing code.
+  const descendants = Array.from(root.querySelectorAll(blockSelector)) as HTMLElement[];
+  for (const node of descendants) {
     if (node.namespaceURI === "http://www.w3.org/1999/xhtml") blocks.push(node);
   }
   for (const element of blocks) {
