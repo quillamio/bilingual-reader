@@ -51,7 +51,7 @@ export function normalizeExportContent(root: HTMLElement): void {
   ].join(",");
 
   const blocks = [root, ...Array.from(root.querySelectorAll(blockSelector))]
-    .filter((node): node is HTMLElement => node instanceof (root.ownerDocument.defaultView?.HTMLElement || HTMLElement));
+    .filter((node): node is HTMLElement => node.nodeType === 1 && node.namespaceURI === "http://www.w3.org/1999/xhtml");
   for (const element of blocks) {
     const style = element.style;
     if (!style || !style.length) continue;
