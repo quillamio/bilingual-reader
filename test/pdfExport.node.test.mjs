@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  configureBilingualPDFPrintSettings,
   hasCompletePDFMarkers,
   sanitizeExportFileBaseName,
 } from "../src/pdfExportUtils.ts";
@@ -42,4 +43,44 @@ test("rejects HTML, missing EOF, and partially written output", () => {
   assert.equal(hasCompletePDFMarkers("<html>", "%%EOF\n"), false);
   assert.equal(hasCompletePDFMarkers("%PDF-1.7\n", "partial output"), false);
   assert.equal(hasCompletePDFMarkers("%PDF-1.7\n", "%%EOF\ntruncated"), false);
+});
+
+
+test("PDF print settings honor A4 CSS @page rather than inherited printer margins", () => {
+  const settings = {
+    marginTop: 0.75,
+    marginBottom: 0.75,
+    marginLeft: 0.75,
+    marginRight: 0.75,
+    shrinkToFit: true,
+    scaling: 0.8,
+    honorPageRuleMargins: false,
+    ignoreUnwriteableMargins: false,
+    usePageRuleSizeAsPaperSize: false,
+  };
+  configureBilingualPDFPrintSettings(settings);
+  assert.equal(settings.marginLeft, 0);
+  assert.equal(settings.marginRight, 0);
+  assert.equal(settings.marginTop, 0);
+  assert.equal(settings.marginBottom, 0);
+  assert.equal(settings.scaling, 1);
+  assert.equal(settings.shrinkToFit, false);
+  assert.equal(settings.honorPageRuleMargins, true);
+  assert.equal(settings.ignoreUnwriteableMargins, true);
+  assert.equal(settings.usePageRuleSizeAsPaperSize, true);
+});
+
+test("legacy Zotero WrappedNative without new page-rule properties remains supported", () => {
+  const settings = {
+    marginTop: 0.5,
+    marginRight: 0.5,
+    marginBottom: 0.5,
+    marginLeft: 0.5,
+    scaling: 0.9,
+    shrinkToFit: true,
+  };
+  configureBilingualPDFPrintSettings(settings);
+  assert.equal(settings.marginLeft, 0);
+  assert.equal(settings.shrinkToFit, false);
+  assert.equal(Object.hasOwn(settings, "honorPageRuleMargins"), false);
 });

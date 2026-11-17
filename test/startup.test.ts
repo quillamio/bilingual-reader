@@ -2,6 +2,7 @@ import { assert } from "chai";
 import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
+import { buildExportHTML } from "../src/readerUI";
 import { clearTranslationCache } from "../src/translationCache";
 
 describe("startup", function () {
@@ -65,6 +66,45 @@ describe("startup", function () {
     } finally {
       win?.close();
     }
+  });
+
+  it("should reflow the printed clone without cutting off negative-offset English/Chinese", function () {
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("export-layout-test");
+    const root = doc.createElement("div");
+    root.id = "sdt-content";
+    root.setAttribute("style", "width: 1300px; transform: translateX(-180px); position: relative;");
+    const source = doc.createElement("p");
+    source.dataset.refPath = "0";
+    source.setAttribute("style", "position: relative; left: -120px; margin-left: -80px; width: 1220px; text-indent: -18px;");
+    source.textContent = "The left part of this English paragraph must be visible.";
+    const translation = doc.createElement("div");
+    translation.className = "bilingual-reader-translation";
+    translation.dataset.state = "done";
+    translation.style.transform = "translateX(-100px)";
+    translation.style.marginLeft = "-70px";
+    translation.textContent = "中文段落开头必须完整显示。";
+    const figure = doc.createElement("figure");
+    const image = doc.createElement("img");
+    image.setAttribute("style", "width: 500px; transform: translateX(-20px);");
+    image.setAttribute("alt", "Figure artwork");
+    figure.append(image);
+    root.append(source, translation, figure);
+    doc.body.append(root);
+
+    const html = buildExportHTML(doc, "Bilingual export layout");
+    assert.include(html, "The left part of this English paragraph must be visible.");
+    assert.include(html, "中文段落开头必须完整显示。");
+    assert.notInclude(html, "translateX(-180px)");
+    assert.notInclude(html, "translateX(-100px)");
+    assert.notInclude(html, "left: -120px");
+    assert.notInclude(html, "margin-left: -80px");
+    assert.include(html, "max-width: 100% !important");
+    assert.include(html, "overflow-wrap: anywhere");
+    // Artwork is not modified by the text normalization pass.
+    assert.include(html, "translateX(-20px)");
+    // The exported HTML is normalized, but the live reader remains untouched.
+    assert.include(source.style.cssText, "left: -120px");
+    assert.include(translation.style.cssText, "translateX(-100px)");
   });
 
   it("should render every reader toolbar icon once without post-render DOM rewrites", function () {
