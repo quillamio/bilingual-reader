@@ -1,4 +1,4 @@
-import { hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -366,7 +366,9 @@ async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
     settings.printInColor = true;
     settings.printBGColors = true;
     settings.printBGImages = true;
-    settings.shrinkToFit = true;
+    // CSS @page sets the A4 margins. Reset prior printer offsets so the
+    // entire text column is rendered inside the page instead of at x < 0.
+    configureBilingualPDFPrintSettings(settings);
     settings.headerStrLeft = "";
     settings.headerStrCenter = "";
     settings.headerStrRight = "";
