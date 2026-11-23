@@ -1,5 +1,6 @@
 import { cleanupBilingualReader, renderBilingualToolbarButtons } from "./bilingualReader";
 import { cleanupReaderUI, renderReaderExportButton } from "./readerUI";
+import { cleanupNativePDFToolbarButton, renderNativePDFToolbarButton } from "./pdfNativeExport";
 
 const PLUGIN_ID = "bilingual-reader@zotero.local";
 const STARTUP_RECONCILE_DELAYS_MS = [250, 1000, 3000];
@@ -9,6 +10,7 @@ type ToolbarRenderer = (event: any) => void;
 const toolbarRenderers: ToolbarRenderer[] = [
   renderBilingualToolbarButtons,
   renderReaderExportButton,
+  renderNativePDFToolbarButton,
 ];
 
 let registered = false;
@@ -104,7 +106,7 @@ export function renderReaderToolbar(event: any): void {
 }
 
 function cleanupReader(reader: any): void {
-  for (const cleanup of [cleanupReaderUI, cleanupBilingualReader]) {
+  for (const cleanup of [cleanupReaderUI, cleanupBilingualReader, cleanupNativePDFToolbarButton]) {
     try {
       cleanup(reader);
     } catch (error) {
