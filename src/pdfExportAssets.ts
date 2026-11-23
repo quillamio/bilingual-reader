@@ -196,5 +196,38 @@ export async function freezePDFExportImages(
   if (cloneCanvases.length !== originalCanvases.length) {
     report.failed += Math.abs(cloneCanvases.length - originalCanvases.length);
   }
+
+  // Inline SVG is preserved by cloneNode(), but nested <image> elements can
+  // still reference blob: URLs owned by the reader frame.
+  const svgImages = exportElements<Element>(source, "svg image");
+  const targetSvgImages = exportElements<Element>(clone, "svg image");
+  for (let i = 0; i < Math.min(svgImages.length, targetSvgImages.length); i++) {
+    const original = svgImages[i];
+    const target = targetSvgImages[i];
+    const raw = original.getAttribute("href") ||
+      original.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
+    if (!raw) continue;
+    if (raw.startsWith("data:")) {
+      report.preserved++;
+      continue;
+    }
+    try {
+      const uri = new URL(raw, original.ownerDocument?.baseURI || "about:blank").href;
+      const owner = original.ownerDocument;
+      if (!owner) throw new Error("SVG has no document.");
+      const { body, mime } = await loadImageBytes(uri, owner);
+      if (!body.byteLength || body.byteLength > MAX_EMBEDDED_IMAGE_BYTES ||
+          totalBytes + body.byteLength > MAX_TOTAL_IMAGE_BYTES) {
+        throw new Error("SVG image is too large.");
+      }
+      totalBytes += body.byteLength;
+      const embedded = "data:" + mime + ";base64," + bufferToBase64(body);
+      target.setAttribute("href", embedded);
+      target.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", embedded);
+      report.embedded++;
+    } catch (_) {
+      report.failed++;
+    }
+  }
   return report;
 }
