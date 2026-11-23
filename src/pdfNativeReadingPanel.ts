@@ -61,7 +61,9 @@ function createPanel(doc: Document, onClose: () => void): {
   status.textContent = "正在读取原始 PDF...";
   const body = doc.createElement("div"); body.className = "body";
   shadow.append(style, header, status, body);
-  doc.body.append(host);
+  const root = doc.body || doc.documentElement;
+  if (!root) throw new Error("PDF viewer document has no root element.");
+  root.append(host);
   return { host, body, status };
 }
 
