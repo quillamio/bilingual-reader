@@ -141,6 +141,7 @@ export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
       (done, total) => {
         if (!session.closed) ui.status.textContent = "翻译：" + done + "/" + total;
       },
+      () => session.closed,
     );
     if (session.closed) return;
     for (const [id, element] of destination) {
