@@ -153,6 +153,32 @@ describe("startup", function () {
     assert.include(root.querySelector("source")?.srcset || "", "blob:broken-on-print");
   });
 
+  it("should replace cloned Canvas with its original PNG pixels", async function () {
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("canvas-export-test");
+    const root = doc.createElement("div");
+    root.id = "sdt-content";
+    const canvas = doc.createElement("canvas");
+    canvas.width = 600;
+    canvas.height = 300;
+    canvas.setAttribute("aria-label", "Scientific figure");
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAAAA";
+    Object.defineProperty(canvas, "toDataURL", { value: () => png });
+    root.append(canvas);
+    doc.body.append(root);
+    const clone = root.cloneNode(true) as HTMLElement;
+    const report = await freezePDFExportImages(root, clone);
+    assert.equal(report.canvasElements, 1);
+    assert.equal(report.embedded, 1);
+    assert.equal(report.failed, 0);
+    const exportedImage = clone.querySelector("img");
+    assert.equal(exportedImage?.getAttribute("src"), png);
+    assert.equal(exportedImage?.getAttribute("width"), "600");
+    assert.equal(exportedImage?.getAttribute("height"), "300");
+    assert.equal(exportedImage?.getAttribute("alt"), "Scientific figure");
+    assert.exists(root.querySelector("canvas"));
+    assert.notExists(root.querySelector("img"));
+  });
+
   it("should render every reader toolbar icon once without post-render DOM rewrites", function () {
     const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("toolbar-test");
     const reader = { type: "pdf", itemID: 2147483644 };
