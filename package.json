@@ -1,7 +1,7 @@
 {
   "name": "zotero-bilingual-reader",
   "type": "module",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Zotero 10 阅读模式 PDF 段落中英对照翻译",
   "keywords": [
     "translation",
