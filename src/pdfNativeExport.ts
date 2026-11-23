@@ -60,6 +60,7 @@ export async function translateNativeDocument(
   itemID: number,
   itemKey: string,
   onProgress?: (done: number, total: number) => void,
+  isCancelled?: () => boolean,
 ): Promise<Map<string, string>> {
   const engine = getEngine();
   const engineTag = getCacheEngineTag();
@@ -79,6 +80,7 @@ export async function translateNativeDocument(
   let done = 0;
   let consecutiveFailures = 0;
   for (const job of jobs) {
+    if (isCancelled?.()) throw new Error("PDF.js 翻译任务已取消。");
     let responses: Array<{ block: typeof pending[number]; result: string; tag: string }> = [];
     try {
       if (job.length === 1) {
@@ -112,6 +114,7 @@ export async function translateNativeDocument(
       }
     }
     done += job.length;
+    if (isCancelled?.()) throw new Error("PDF.js 翻译任务已取消。");
     onProgress?.(done, pending.length);
     if (getRequestGapMs()) await Zotero.Promise.delay(getRequestGapMs());
   }
