@@ -5,6 +5,8 @@ import { renderReaderToolbar } from "../src/readerToolbar";
 import { buildExportHTML } from "../src/readerUI";
 import { freezePDFExportImages } from "../src/pdfExportAssets";
 import { clearTranslationCache } from "../src/translationCache";
+import { parseNormalPDFWithPDFJS, getNormalPDFProxy } from "../src/pdfNativeRuntime";
+import { validateDoclingEndpoint } from "../src/pdfNativeDocling";
 
 describe("startup", function () {
   it("should have plugin instance defined", function () {
@@ -190,6 +192,7 @@ describe("startup", function () {
     assert.equal(doc.querySelectorAll(".bilingual-reader-toolbar-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-refresh-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-export-button").length, 1);
+    assert.equal(doc.querySelectorAll(".bilingual-reader-native-pdf-button").length, 1);
     assert.equal(doc.querySelector(".bilingual-reader-toolbar-button")?.textContent, "🀄");
     assert.equal(doc.querySelector(".bilingual-reader-export-button")?.textContent, "🖨️");
     assert.notExists(doc.querySelector(".bilingual-reader-settings-button"));
