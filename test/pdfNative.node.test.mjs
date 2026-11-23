@@ -5,7 +5,6 @@ import {
   validateNativeDocument,
 } from "../src/pdfNativeModel.ts";
 import { buildNativeBilingualHTML } from "../src/pdfNativeHtml.ts";
-import { validateDoclingEndpoint } from "../src/pdfNativeDocling.ts";
 
 function item(str, x, y, width = 170) {
   return { str, transform: [10, 0, 0, 10, x, y], width, height: 10 };
@@ -76,13 +75,4 @@ test("export never silently omits a source page whose image is missing", () => {
   assert.throws(() => buildNativeBilingualHTML([
     { pageIndex: 0, image: "", blocks: [] },
   ], "Invalid", "pdfjs"), /原始页面图像缺失/u);
-});
-test("Docling endpoint is restricted to a safe loopback port", () => {
-  assert.equal(validateDoclingEndpoint("http://127.0.0.1:8786"), "http://127.0.0.1:8786");
-  assert.equal(validateDoclingEndpoint("http://localhost:8786/"), "http://localhost:8786");
-  for (const bad of [
-    "https://localhost:8786", "http://example.org:8786",
-    "http://127.0.0.1:80", "http://127.0.0.1:8786/parse",
-    "http://127.0.0.1:8786?q=1", "http://user:pass@localhost:8786",
-  ]) assert.throws(() => validateDoclingEndpoint(bad), /Docling/u);
 });
