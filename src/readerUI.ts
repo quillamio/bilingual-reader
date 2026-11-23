@@ -310,7 +310,7 @@ async function waitForGeneratedFile(file: any): Promise<void> {
   );
 }
 
-async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<any> {
+export async function importExportedPDF(tempFile: any, sourceAttachment: any, suffix = "中英对照翻译"): Promise<any> {
   const parentItemID = Number(sourceAttachment?.parentItemID || 0);
   if (!parentItemID) {
     throw new Error("当前 PDF 没有父级文献条目，无法作为条目附件保存。请先为该 PDF 创建父级条目。");
@@ -321,10 +321,10 @@ async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<
   const attachment = await (Zotero.Attachments as any).importFromFile({
     file: tempFile,
     parentItemID,
-    fileBaseName: sanitizeExportFileBaseName(`${parentTitle || "文献"} - 中英对照翻译`),
+    fileBaseName: sanitizeExportFileBaseName(`${parentTitle || "文献"} - ${suffix}`),
     contentType: "application/pdf",
   });
-  attachment.setField("title", `${parentTitle || "文献"} - 中英对照翻译`);
+  attachment.setField("title", `${parentTitle || "文献"} - ${suffix}`);
   await attachment.saveTx();
   return attachment;
 }
@@ -341,7 +341,7 @@ function getHiddenBrowserConstructor(): any {
   return module.HiddenBrowser;
 }
 
-async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
+export async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
   const mainWindow = Zotero.getMainWindow() as any;
   const printUtils = mainWindow?.PrintUtils;
   if (!printUtils?.getPrintSettings) {
