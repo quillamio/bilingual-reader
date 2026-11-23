@@ -59,20 +59,18 @@ function bufferToBase64(buffer: ArrayBuffer): string {
 async function loadImageBytes(url: string, doc: Document): Promise<{ body: ArrayBuffer; mime: string }> {
   // A blob URL often only exists in the document that created it.
   const win = doc.defaultView as (Window & { fetch?: typeof fetch }) | null;
-  if (win && typeof win.fetch === "function") {
-    try {
-      const response = await win.fetch(url, { credentials: "omit" });
-      if (response.ok) {
-        const blob = await response.blob();
-        return { body: await blob.arrayBuffer(), mime: mimeFor(url, blob.type) };
-      }
-    } catch (_) {
-      // Zotero's privileged HTTP path handles resource:/chrome: URLs.
+  // Only reader-scoped blob URLs require the originating window. Normal
+  // HTTP/resource URLs use Zotero.HTTP with a bounded 15-second timeout;
+  // window.fetch() can hang indefinitely during PDF export.
+  if (/^blob:/iu.test(url)) {
+    if (!win || typeof win.fetch !== "function") {
+      throw new Error("Reader blob URL is not accessible.");
     }
+    const response = await win.fetch(url, { credentials: "omit" });
+    if (!response.ok) throw new Error("Cannot load reader blob image.");
+    const blob = await response.blob();
+    return { body: await blob.arrayBuffer(), mime: mimeFor(url, blob.type) };
   }
-
-  // Zotero.HTTP cannot retrieve reader-specific blob URLs.
-  if (/^blob:/iu.test(url)) throw new Error("Reader blob URL is not accessible.");
   const xhr = await Zotero.HTTP.request("GET", url, {
     responseType: "arraybuffer",
     timeout: 15000,
