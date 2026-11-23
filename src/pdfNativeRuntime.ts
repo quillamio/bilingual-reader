@@ -38,7 +38,9 @@ export function getNormalPDFProxy(reader: any): PDFProxyHandle | null {
     internal?._primaryView?._pdfView, internal?._secondaryView?._pdfView,
   ]) {
     try {
-      if (view?._pdfDocument?.getPage) {
+      if (view?._pdfDocument?.getPage &&
+          Number.isInteger(view._pdfDocument.numPages) &&
+          view._pdfDocument.numPages > 0) {
         return { pdf: view._pdfDocument, contentWindow: view?._iframeWindow || null };
       }
     } catch (_) { /* Detached view */ }
@@ -66,7 +68,8 @@ export function getNormalPDFProxy(reader: any): PDFProxyHandle | null {
     } catch (_) { /* Inaccessible privileged frame */ }
   }
   if (internal?._pdfDocument?.getPage &&
-      Number.isInteger(internal._pdfDocument.numPages)) {
+      Number.isInteger(internal._pdfDocument.numPages) &&
+      internal._pdfDocument.numPages > 0) {
     return { pdf: internal._pdfDocument, contentWindow: null };
   }
   return null;
@@ -119,7 +122,13 @@ export async function snapshotPDFPage(
 ): Promise<string> {
   const page = await pdf.getPage(pageIndex + 1);
   const viewport = page.getViewport(cloneForWindow({ scale }, contentWindow));
-  const canvas = doc.createElement("canvas") as HTMLCanvasElement;
+  // Keep canvas and PDF.js rendering context in the viewer's compartment
+  // when possible. Firefox's Xray wrappers may reject a canvas context that
+  // originated from the privileged Zotero preferences window.
+  let renderDocument: Document = doc;
+  try { if (contentWindow?.document) renderDocument = contentWindow.document; }
+  catch (_) { /* Retain caller's document */ }
+  const canvas = renderDocument.createElement("canvas") as HTMLCanvasElement;
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
   const context = canvas.getContext("2d", { alpha: false }) as CanvasRenderingContext2D | null;
