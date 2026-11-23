@@ -3,6 +3,7 @@ import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
 import { buildExportHTML } from "../src/readerUI";
+import { freezePDFExportImages } from "../src/pdfExportAssets";
 import { clearTranslationCache } from "../src/translationCache";
 
 describe("startup", function () {
@@ -105,6 +106,51 @@ describe("startup", function () {
     // The exported HTML is normalized, but the live reader remains untouched.
     assert.include(source.style.cssText, "left: -120px");
     assert.include(translation.style.cssText, "translateX(-100px)");
+  });
+
+  it("should allow long bilingual paragraphs to flow across PDF pages", function () {
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("page-break-test");
+    const root = doc.createElement("div");
+    root.id = "sdt-content";
+    const paragraph = doc.createElement("p");
+    paragraph.textContent = "Long paragraph. ".repeat(2500);
+    const translated = doc.createElement("div");
+    translated.className = "bilingual-reader-translation";
+    translated.dataset.state = "done";
+    translated.textContent = "很长的中文译文。".repeat(1500);
+    root.append(paragraph, translated);
+    doc.body.append(root);
+    const html = buildExportHTML(doc, "Pagination regression");
+    assert.include(html, "page-break-inside: auto !important");
+    assert.include(html, "figure, table, pre {\n    break-inside: auto !important");
+    assert.include(html, "tr { break-inside: avoid-page");
+    assert.notInclude(html, "figure, table, pre {\n    break-inside: avoid-page");
+  });
+
+  it("should preserve existing data-url images in PDF export clones", async function () {
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("image-export-test");
+    const root = doc.createElement("div");
+    root.id = "sdt-content";
+    const figure = doc.createElement("figure");
+    const picture = doc.createElement("picture");
+    const source = doc.createElement("source");
+    source.srcset = "blob:broken-on-print";
+    const img = doc.createElement("img");
+    const dataURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+    img.src = dataURL;
+    picture.append(source, img);
+    figure.append(picture);
+    root.append(figure);
+    doc.body.append(root);
+    const clone = root.cloneNode(true) as HTMLElement;
+    const report = await freezePDFExportImages(root, clone);
+    assert.equal(report.imageElements, 1);
+    assert.equal(report.failed, 0);
+    assert.equal(report.preserved, 1);
+    const output = buildExportHTML(doc, "Image export", clone);
+    assert.include(output, dataURL);
+    assert.notInclude(output, 'srcset="blob:broken-on-print"');
+    assert.include(root.querySelector("source")?.srcset || "", "blob:broken-on-print");
   });
 
   it("should render every reader toolbar icon once without post-render DOM rewrites", function () {
