@@ -181,6 +181,42 @@ describe("startup", function () {
     assert.notExists(root.querySelector("img"));
   });
 
+  it("should parse PDF.js normal-view text without SDT reading-mode data", async function () {
+    const stubPage = {
+      getViewport: () => ({ width: 595, height: 842 }),
+      getTextContent: async () => ({ items: [
+        { str: "Figure 1. Original chart", transform: [10,0,0,10,30,700],
+          width: 180, height: 10 },
+        { str: "This is the original PDF.", transform: [10,0,0,10,30,650],
+          width: 260, height: 10 },
+      ] }),
+      cleanup: () => undefined,
+    };
+    const fakePDF = { numPages: 1, getPage: async () => stubPage };
+    const reader = { _iframeWindow: {
+      PDFViewerApplication: { pdfDocument: fakePDF },
+    } };
+    const handle = getNormalPDFProxy(reader);
+    assert.equal(handle?.pdf, fakePDF);
+    const result = await parseNormalPDFWithPDFJS(handle!.pdf);
+    assert.equal(result.source, "pdfjs");
+    assert.equal(result.pages.length, 1);
+    assert.equal(result.pages[0].blocks[0].type, "caption");
+    assert.include(result.pages[0].blocks[1].text, "original PDF");
+  });
+
+  it("should prevent Docling external network access", function () {
+    assert.equal(validateDoclingEndpoint("http://127.0.0.1:8786"),
+      "http://127.0.0.1:8786");
+    for (const invalid of [
+      "https://127.0.0.1:8786",
+      "http://evil.example.com:8786",
+      "http://localhost:8786/parse",
+    ]) {
+      assert.throws(() => validateDoclingEndpoint(invalid), /Docling/u);
+    }
+  });
+
   it("should render every reader toolbar icon once without post-render DOM rewrites", function () {
     const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("toolbar-test");
     const reader = { type: "pdf", itemID: 2147483644 };
