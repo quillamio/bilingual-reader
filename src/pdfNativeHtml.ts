@@ -1,4 +1,4 @@
-import { type NativeBlock } from "./pdfNativeModel";
+import type { NativeBlock } from "./pdfNativeModel";
 
 export interface NativeExportPage {
   pageIndex: number;
