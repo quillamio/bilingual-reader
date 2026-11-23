@@ -77,13 +77,21 @@ async function loadImageBytes(url: string, doc: Document): Promise<{ body: Array
     responseType: "arraybuffer",
     timeout: 15000,
   });
-  if (xhr?.status !== 200 || !(xhr.response instanceof ArrayBuffer)) {
-    throw new Error("Cannot retrieve original image bytes.");
+  if (xhr?.status !== 200) throw new Error("Cannot retrieve original image bytes.");
+  // Firefox may return a cross-compartment ArrayBuffer, which fails
+  // instanceof ArrayBuffer against the plugin's global constructor.
+  const response = xhr.response;
+  let bytes: Uint8Array | null = null;
+  if (ArrayBuffer.isView(response)) {
+    bytes = new Uint8Array(response.buffer, response.byteOffset, response.byteLength);
+  } else if (response && typeof response.byteLength === "number") {
+    bytes = new Uint8Array(response as ArrayBuffer);
   }
+  if (!bytes?.length) throw new Error("Image response contains no usable bytes.");
   const contentType = typeof xhr.getResponseHeader === "function"
     ? String(xhr.getResponseHeader("content-type") || "").split(";")[0]
     : "";
-  return { body: xhr.response, mime: mimeFor(url, contentType) };
+  return { body: bytes.slice().buffer as ArrayBuffer, mime: mimeFor(url, contentType) };
 }
 
 function setEmbeddedImage(target: HTMLImageElement, url: string): void {
