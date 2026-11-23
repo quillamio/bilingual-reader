@@ -1,4 +1,5 @@
-import { hasCompletePDFMarkers, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { freezePDFExportImages } from "./pdfExportAssets";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -98,11 +99,14 @@ function getTranslationStats(doc: Document): { done: number; unfinished: number 
   return { done, unfinished };
 }
 
-function buildExportHTML(doc: Document, title: string): string {
+export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTMLElement): string {
   const sourceRoot = doc.querySelector("#sdt-content") as HTMLElement | null;
   if (!sourceRoot) throw new Error("无法读取当前 Zotero 阅读模式正文。");
 
-  const root = sourceRoot.cloneNode(true) as HTMLElement;
+  const root = preparedRoot || (sourceRoot.cloneNode(true) as HTMLElement);
+  // Reflow only the export clone. The live SDT reader maintains its original
+  // viewport-relative geometry so highlights/annotations keep working.
+  normalizeExportContent(root);
   const unfinishedBlocks = Array.from(
     root.querySelectorAll(`.${TRANSLATION_CLASS}:not([data-state="done"])`),
   ) as HTMLElement[];
@@ -132,38 +136,82 @@ function buildExportHTML(doc: Document, title: string): string {
   html, body {
     background: #fff;
     color: #111;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
   }
   body {
-    margin: 0 auto;
-    max-width: 176mm;
+    overflow-wrap: anywhere;
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial,
       "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     font-size: 10.5pt;
     line-height: 1.55;
   }
+  /* The printable width is governed by @page margins, not Zotero's
+     on-screen SDT viewport. All exported text must reflow inside it. */
   #sdt-content {
-    width: auto !important;
-    max-width: none !important;
+    position: static !important;
+    transform: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     margin: 0 !important;
     padding: 0 !important;
   }
-  p, li, blockquote {
-    orphans: 3;
-    widows: 3;
+  #sdt-content :is(
+    p, h1, h2, h3, h4, h5, h6, div, section, article,
+    li, ul, ol, blockquote, aside, figcaption
+  ):not(figure *) {
+    position: static !important;
+    transform: none !important;
+    translate: none !important;
+    float: none !important;
+    left: auto !important;
+    right: auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    overflow-wrap: anywhere !important;
+  }
+  #sdt-content :is(p, li, blockquote, aside, figcaption):not(figure *) {
+    text-indent: 0 !important;
+    white-space: normal !important;
+  }
+  #sdt-content :is(ul, ol) {
+    padding-inline-start: 1.25em !important;
+  }
+  /* Keep long bilingual paragraphs flowing across page boundaries. */
+  p, li, blockquote, .${TRANSLATION_CLASS} {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    orphans: 2;
+    widows: 2;
   }
   h1, h2, h3, h4, h5, h6 {
     break-after: avoid-page;
     page-break-after: avoid;
     line-height: 1.3;
   }
+  /* Prevent blank bands caused by pushing whole figures/tables/pre
+     blocks to the next sheet. Individual table rows remain together. */
   figure, table, pre {
-    break-inside: avoid-page;
-    page-break-inside: avoid;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
   }
+  tr { break-inside: avoid-page; page-break-inside: avoid; }
+  pre { white-space: pre-wrap !important; overflow-wrap: anywhere !important; }
   img, svg, canvas {
     max-width: 100% !important;
     height: auto !important;
+    object-fit: contain;
   }
+  figure img { max-height: 230mm !important; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -179,6 +227,8 @@ function buildExportHTML(doc: Document, title: string): string {
     text-decoration: none;
   }
   .${TRANSLATION_CLASS} {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere !important;
     margin: 0.18em 0 0.7em !important;
     padding: 0.12em 0 0.12em 0.78em !important;
     border-left: 2.2pt solid #c7354a !important;
@@ -186,8 +236,10 @@ function buildExportHTML(doc: Document, title: string): string {
     background: transparent !important;
     font-size: 10.2pt !important;
     line-height: 1.58 !important;
-    break-inside: avoid-page;
-    page-break-inside: avoid;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    orphans: 2;
+    widows: 2;
   }
   .${TRANSLATION_CLASS}[data-state="done"]::before {
     content: "";
@@ -258,7 +310,7 @@ async function waitForGeneratedFile(file: any): Promise<void> {
   );
 }
 
-async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<any> {
+export async function importExportedPDF(tempFile: any, sourceAttachment: any, suffix = "中英对照翻译"): Promise<any> {
   const parentItemID = Number(sourceAttachment?.parentItemID || 0);
   if (!parentItemID) {
     throw new Error("当前 PDF 没有父级文献条目，无法作为条目附件保存。请先为该 PDF 创建父级条目。");
@@ -269,10 +321,10 @@ async function importExportedPDF(tempFile: any, sourceAttachment: any): Promise<
   const attachment = await (Zotero.Attachments as any).importFromFile({
     file: tempFile,
     parentItemID,
-    fileBaseName: sanitizeExportFileBaseName(`${parentTitle || "文献"} - 中英对照翻译`),
+    fileBaseName: sanitizeExportFileBaseName(`${parentTitle || "文献"} - ${suffix}`),
     contentType: "application/pdf",
   });
-  attachment.setField("title", `${parentTitle || "文献"} - 中英对照翻译`);
+  attachment.setField("title", `${parentTitle || "文献"} - ${suffix}`);
   await attachment.saveTx();
   return attachment;
 }
@@ -289,7 +341,7 @@ function getHiddenBrowserConstructor(): any {
   return module.HiddenBrowser;
 }
 
-async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
+export async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
   const mainWindow = Zotero.getMainWindow() as any;
   const printUtils = mainWindow?.PrintUtils;
   if (!printUtils?.getPrintSettings) {
@@ -326,7 +378,9 @@ async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
     settings.printInColor = true;
     settings.printBGColors = true;
     settings.printBGImages = true;
-    settings.shrinkToFit = true;
+    // CSS @page sets the A4 margins. Reset prior printer offsets so the
+    // entire text column is rendered inside the page instead of at x < 0.
+    configureBilingualPDFPrintSettings(settings);
     settings.headerStrLeft = "";
     settings.headerStrCenter = "";
     settings.headerStrRight = "";
@@ -401,7 +455,22 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
 
   let importedAttachment: any = null;
   try {
-    const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`);
+    const liveRoot = doc.querySelector("#sdt-content") as HTMLElement;
+    const exportClone = liveRoot.cloneNode(true) as HTMLElement;
+    const assets = await freezePDFExportImages(liveRoot, exportClone);
+    if (assets.failed || assets.absentFigureCaptions) {
+      const parts: string[] = [];
+      if (assets.failed) parts.push(`${assets.failed} 个图片/Canvas 资源无法直接嵌入`);
+      if (assets.absentFigureCaptions) {
+        parts.push(`${assets.absentFigureCaptions} 个图注附近没有发现可导出的图片元素`);
+      }
+      if (!confirmMessage(reader,
+        `检测到可能缺失的图片：${parts.join("；")}。\n\n` +
+        "这通常是 Zotero 阅读模式未加载相应图像。继续导出可能缺图，建议检查原始 PDF。是否继续？")) {
+        return;
+      }
+    }
+    const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
     await printHTMLToPDF(html, tempFile);
     importedAttachment = await importExportedPDF(tempFile, sourceAttachment);
   } catch (error: any) {

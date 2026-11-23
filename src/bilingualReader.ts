@@ -231,7 +231,7 @@ async function translateWithOllama(text: string): Promise<TranslationResponse> {
   return { text: result.trim(), engineTag: getCacheEngineTag() };
 }
 
-async function translateText(
+export async function translateText(
   text: string,
   itemID: number,
   engine: TranslationEngine,

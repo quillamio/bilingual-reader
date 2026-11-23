@@ -31,6 +31,10 @@ import {
   type TranslationEngine,
 } from "../settings";
 import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
+import {
+  getNativePDFBackend, setNativePDFBackend, getDoclingEndpoint, setDoclingEndpoint,
+  checkDoclingConnection,
+} from "../pdfNativeDocling";
 
 const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
 
@@ -66,6 +70,20 @@ function saveSettings(doc: Document): void {
     getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
     DEFAULT_OLLAMA_MODEL;
 
+  try {
+    const nativeValue = getElement<HTMLSelectElement>(
+      doc, "bilingualreader-native-backend",
+    )?.value;
+    const doclingURL = getElement<HTMLInputElement>(
+      doc, "bilingualreader-docling-url",
+    )?.value || getDoclingEndpoint();
+    // Reject an invalid/non-local URL before changing any other setting.
+    setDoclingEndpoint(doclingURL);
+    setNativePDFBackend(nativeValue === "docling" ? "docling" : "pdfjs");
+  } catch (error: any) {
+    setStatus(doc, "PDF 解析引擎配置错误：" + String(error?.message || error));
+    return;
+  }
   setEngine(engine);
   setOllamaURL(url);
   setOllamaModel(model);
@@ -88,6 +106,25 @@ function saveSettings(doc: Document): void {
   );
 
   setStatus(doc, "设置已保存。返回正在阅读的 PDF 后点击 🔄 即可应用。 ");
+}
+
+async function testDocling(doc: Document): Promise<void> {
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-docling");
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  try {
+    const url = getElement<HTMLInputElement>(
+      doc, "bilingualreader-docling-url",
+    )?.value || getDoclingEndpoint();
+    const connected = await checkDoclingConnection(url);
+    setStatus(doc, connected
+      ? "Docling 本地服务连通成功。"
+      : "Docling 本地服务响应格式无效。");
+  } catch (error: any) {
+    setStatus(doc, "Docling 连接失败：" + String(error?.message || error));
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function testOllama(doc: Document): Promise<void> {
@@ -204,6 +241,10 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
   const requestTimeout = getElement<HTMLInputElement>(doc, "bilingualreader-request-timeout");
 
+  const native = getElement<HTMLSelectElement>(doc, "bilingualreader-native-backend");
+  const doclingURL = getElement<HTMLInputElement>(doc, "bilingualreader-docling-url");
+  if (native) native.value = getNativePDFBackend();
+  if (doclingURL) doclingURL.value = getDoclingEndpoint();
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
   if (model) model.value = getOllamaModel();
@@ -228,6 +269,11 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
     saveSettings(doc);
   });
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-test-docling")?.addEventListener(
+    "click",
+    () => { void testDocling(doc); },
+  );
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-test-ollama")?.addEventListener(
     "click",

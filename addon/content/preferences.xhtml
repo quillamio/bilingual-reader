@@ -40,6 +40,35 @@
   </html:p>
 </groupbox>
 
+<groupbox id="bilingualreader-native-section">
+  <label><html:h3>原始 PDF 解析（不依赖 Zotero 阅读模式）</html:h3></label>
+  <html:p style="line-height:1.65;margin:0 0 10px;max-width:760px">
+    点击普通 PDF 阅读器工具栏的「📑」可直接由 PDF.js 读取原始页面文字与坐标，
+    生成完整原始页图像 + 可复制中英译文页。原始 Figure 不依赖 Zotero 阅读模式图像块。
+    首版页面会转成 JPEG，不保留原始页的矢量可编辑性；原始 Zotero 附件不会被修改。
+  </html:p>
+  <hbox align="center" style="margin-bottom:9px">
+    <html:label for="bilingualreader-native-backend" style="min-width:140px">PDF 解析引擎</html:label>
+    <html:select id="bilingualreader-native-backend" style="min-width:320px;padding:4px 8px">
+      <html:option value="pdfjs">PDF.js（内置，推荐）</html:option>
+      <html:option value="docling">Docling（本地增强，可选）</html:option>
+    </html:select>
+  </hbox>
+  <hbox align="center" style="margin-bottom:9px">
+    <html:label for="bilingualreader-docling-url" style="min-width:140px">本地 Docling 地址</html:label>
+    <html:input id="bilingualreader-docling-url" type="text"
+      style="width:380px;padding:4px 8px" placeholder="http://127.0.0.1:8786"/>
+    <html:button id="bilingualreader-test-docling" type="button"
+      style="margin-left:8px;padding:5px 10px">测试连接</html:button>
+  </hbox>
+  <html:p style="line-height:1.6;margin:0;max-width:760px">
+    Docling 需要另行在 Mac 安装 Python 与 Docling，然后运行源码中的
+    scripts/docling_local_server.py。本插件只连接 127.0.0.1/localhost，
+    不向外部云端发送 PDF；离线首次使用可能需要提前下载模型。
+    若 Docling 服务不可用，可手动回退 PDF.js。
+  </html:p>
+</groupbox>
+
 <groupbox id="bilingualreader-page-section">
   <label><html:h3>翻译范围</html:h3></label>
   <hbox align="center" style="margin-bottom: 8px">
