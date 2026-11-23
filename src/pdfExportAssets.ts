@@ -29,7 +29,7 @@ function normalizeSrc(image: HTMLImageElement): string {
   const raw = image.currentSrc || image.getAttribute("src") || image.getAttribute("data-src") || "";
   if (!raw || raw.trim().startsWith("data:")) return raw.trim();
   try {
-    return new URL(raw, image.ownerDocument.baseURI).href;
+    return new URL(raw, image.ownerDocument?.baseURI || "about:blank").href;
   } catch (_) {
     return raw;
   }
@@ -94,7 +94,7 @@ function setEmbeddedImage(target: HTMLImageElement, url: string): void {
   target.setAttribute("loading", "eager");
   // The source may have been picked via <picture> and override our new src.
   if (target.parentElement?.tagName.toLowerCase() === "picture") {
-    for (const source of Array.from(target.parentElement.querySelectorAll("source"))) {
+    for (const source of Array.from(target.parentElement.querySelectorAll("source")) as Element[]) {
       source.remove();
     }
   }
@@ -150,7 +150,9 @@ export async function freezePDFExportImages(
       continue;
     }
     try {
-      const { body, mime } = await loadImageBytes(src, original.ownerDocument);
+      const doc = original.ownerDocument;
+      if (!doc) throw new Error("Image element has no owner document.");
+      const { body, mime } = await loadImageBytes(src, doc);
       if (!body.byteLength || body.byteLength > MAX_EMBEDDED_IMAGE_BYTES ||
         totalBytes + body.byteLength > MAX_TOTAL_IMAGE_BYTES) {
         throw new Error("Image exceeds export size limit.");
@@ -176,7 +178,9 @@ export async function freezePDFExportImages(
       if (!/^data:image\/png;base64,/iu.test(dataURI) || dataURI.length < 32) {
         throw new Error("Canvas has no pixel data.");
       }
-      const replacement = target.ownerDocument.createElement("img");
+      const doc = target.ownerDocument;
+      if (!doc) throw new Error("Canvas clone has no owner document.");
+      const replacement = doc.createElement("img");
       replacement.setAttribute("src", dataURI);
       replacement.setAttribute("alt", original.getAttribute("aria-label") || "PDF figure");
       replacement.setAttribute("width", String(original.width));
