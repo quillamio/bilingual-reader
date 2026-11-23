@@ -229,6 +229,7 @@ describe("startup", function () {
     assert.equal(doc.querySelectorAll(".bilingual-reader-refresh-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-export-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-native-pdf-button").length, 1);
+    assert.equal(doc.querySelectorAll(".bilingual-reader-native-reading-button").length, 1);
     assert.equal(doc.querySelector(".bilingual-reader-toolbar-button")?.textContent, "🀄");
     assert.equal(doc.querySelector(".bilingual-reader-export-button")?.textContent, "🖨️");
     assert.notExists(doc.querySelector(".bilingual-reader-settings-button"));
