@@ -1,4 +1,5 @@
 import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { freezePDFExportImages } from "./pdfExportAssets";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -98,11 +99,11 @@ function getTranslationStats(doc: Document): { done: number; unfinished: number 
   return { done, unfinished };
 }
 
-export function buildExportHTML(doc: Document, title: string): string {
+export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTMLElement): string {
   const sourceRoot = doc.querySelector("#sdt-content") as HTMLElement | null;
   if (!sourceRoot) throw new Error("无法读取当前 Zotero 阅读模式正文。");
 
-  const root = sourceRoot.cloneNode(true) as HTMLElement;
+  const root = preparedRoot || (sourceRoot.cloneNode(true) as HTMLElement);
   // Reflow only the export clone. The live SDT reader maintains its original
   // viewport-relative geometry so highlights/annotations keep working.
   normalizeExportContent(root);
@@ -185,23 +186,32 @@ export function buildExportHTML(doc: Document, title: string): string {
   #sdt-content :is(ul, ol) {
     padding-inline-start: 1.25em !important;
   }
-  p, li, blockquote {
-    orphans: 3;
-    widows: 3;
+  /* Keep long bilingual paragraphs flowing across page boundaries. */
+  p, li, blockquote, .${TRANSLATION_CLASS} {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    orphans: 2;
+    widows: 2;
   }
   h1, h2, h3, h4, h5, h6 {
     break-after: avoid-page;
     page-break-after: avoid;
     line-height: 1.3;
   }
+  /* Prevent blank bands caused by pushing whole figures/tables/pre
+     blocks to the next sheet. Individual table rows remain together. */
   figure, table, pre {
-    break-inside: avoid-page;
-    page-break-inside: avoid;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
   }
+  tr { break-inside: avoid-page; page-break-inside: avoid; }
+  pre { white-space: pre-wrap !important; overflow-wrap: anywhere !important; }
   img, svg, canvas {
     max-width: 100% !important;
     height: auto !important;
+    object-fit: contain;
   }
+  figure img { max-height: 230mm !important; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -226,8 +236,10 @@ export function buildExportHTML(doc: Document, title: string): string {
     background: transparent !important;
     font-size: 10.2pt !important;
     line-height: 1.58 !important;
-    break-inside: avoid-page;
-    page-break-inside: avoid;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    orphans: 2;
+    widows: 2;
   }
   .${TRANSLATION_CLASS}[data-state="done"]::before {
     content: "";
@@ -443,7 +455,22 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
 
   let importedAttachment: any = null;
   try {
-    const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`);
+    const liveRoot = doc.querySelector("#sdt-content") as HTMLElement;
+    const exportClone = liveRoot.cloneNode(true) as HTMLElement;
+    const assets = await freezePDFExportImages(liveRoot, exportClone);
+    if (assets.failed || assets.absentFigureCaptions) {
+      const parts: string[] = [];
+      if (assets.failed) parts.push(`${assets.failed} 个图片/Canvas 资源无法直接嵌入`);
+      if (assets.absentFigureCaptions) {
+        parts.push(`${assets.absentFigureCaptions} 个图注附近没有发现可导出的图片元素`);
+      }
+      if (!confirmMessage(reader,
+        `检测到可能缺失的图片：${parts.join("；")}。\n\n` +
+        "这通常是 Zotero 阅读模式未加载相应图像。继续导出可能缺图，建议检查原始 PDF。是否继续？")) {
+        return;
+      }
+    }
+    const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
     await printHTMLToPDF(html, tempFile);
     importedAttachment = await importExportedPDF(tempFile, sourceAttachment);
   } catch (error: any) {
