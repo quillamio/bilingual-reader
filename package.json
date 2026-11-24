@@ -1,8 +1,8 @@
 {
   "name": "zotero-bilingual-reader",
   "type": "module",
-  "version": "0.6.0-beta",
-  "description": "Zotero 10 多引擎 PDF 解析、双语阅读与 PDF 导出",
+  "version": "0.6.0-beta.1",
+  "description": "Zotero 10 阅读模式PDF 段落中英对照翻译",
   "keywords": [
     "translation",
     "reader",
