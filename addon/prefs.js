@@ -1,5 +1,6 @@
-pref("engine", "google");
+pref("engine", "pdftranslate");
 pref("native.backend", "pdfjs");
+pref("export.layout", "stacked");
 pref("native.doclingURL", "http://127.0.0.1:8786");
 pref("ollama.url", "http://127.0.0.1:11434");
 pref("ollama.model", "gpt-oss:20b");
@@ -10,3 +11,5 @@ pref("maxBatchParagraphs", 6);
 pref("maxConsecutiveErrors", 3);
 pref("requestTimeoutMs", 60000);
 pref("skipLastPages", 1);
+pref("translateAllPages", false);
+pref("cacheMaxEntries", 1500);

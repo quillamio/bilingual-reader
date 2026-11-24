@@ -6,20 +6,30 @@
 
 **Zotero 10 阅读模式 PDF 段落中英对照翻译。**
 
-在 Zotero 10 的 PDF 阅读模式中读取结构化段落，将英文原文与中文译文按段落连续显示，适合论文精读。
+在 Zotero 10 的 PDF 阅读模式中读取结构化段落，将英文原文与中文译文按段落连续显示，适合论文精读。Zotero 标记的图表区域加载失败时，会在滚动到附近后尝试从原 PDF 本地补绘。
 
 > 本插件由 GPT 编写。
+
+## 0.6.0-beta 新功能
+
+- 阅读模式里的图表加载失败时，从原 PDF 按坐标在本机补绘。
+- PDF 导出默认上下对照，可切换成左侧原 PDF、右侧可搜索译文。沿用原来的 🖨️ 按钮，无需额外排版服务。
+- Zotero 阅读模式不可用时，可用已配置的 MinerU 接替解析。上传原 PDF 前会征求确认。
+- 保留 Translate for Zotero 为默认引擎，沿用已保存的选择。新增独立服务配置、智谱 GLM-4.7-Flash，以及引擎旁的连接测试结果。
+- 设置自动保存。可选择翻译整篇或跳过末页和参考文献，也可调整缓存段数。
+
+Beta 如遇不稳定，可从 Releases 下载并重新安装 [v0.5.2 稳定版](https://github.com/quillamio/bilingual-reader/releases/tag/v0.5.2)。
 
 ## 主要功能
 
 - 🀄 一键开启 / 关闭 Zotero 原有阅读模式的段落中英对照。
-- 📖 **PDF.js 原生双语阅读面板**：普通 PDF 页面视图下直接提取文本翻译，保留原始页面图片，不依赖 Zotero SDT 阅读模式。
-- 📑 **PDF.js 原版保真双语导出**：直接复制原始 PDF 页面（保留原图、矢量和文字层），后附可搜索的英中对照页；支持 PDF.js、Docling、MinerU、Mistral OCR 和 LlamaParse 五种解析器。
-- 默认内置 **Google 翻译（免 API Key）**；独立段落翻译引擎，另有 Ollama 与 Translate for Zotero 兼容模式。
+- **MinerU 阅读回退**：Zotero 阅读模式打不开或没有正文时，可以确认上传原 PDF 至 MinerU，继续上下双语阅读。
+- **双语 PDF 导出**：默认上下对照，可切换为左侧原 PDF、右侧可搜索译文。支持 PDF.js、Docling、MinerU、Mistral OCR 和 LlamaParse 解析。
+- 默认使用 **Translate for Zotero** 当前配置的翻译服务。也可选内置 Google 翻译（免 API Key）、Bing、Ollama 等引擎。
 - 可选 **Ollama** 本地或云端模型。
-- 自动缓存已完成译文。
+- 自动缓存已完成译文，默认最多 1500 段，可调整段数。
 - 支持短段落合并、受控并发、请求节流、超时与连续失败暂停。
-- 可设置“不翻译末尾页数”，用于跳过参考文献。
+- 翻译范围默认选「翻译非参考文献段落」，跳过末尾一页和 Zotero 标记的参考文献，单页 PDF 仍翻译正文。选「翻译所有页面」则纳入末页和参考文献。
 - 🔄 可取消当前任务并按最新设置重新翻译。
 - 🖨️ 可尝试将当前双语阅读结果导出为 PDF，并添加为当前文献的 Zotero 附件。
 
@@ -27,8 +37,7 @@
 
 - Zotero 10.x
 - macOS 为主要测试平台
-- 默认 Google 无需额外安装插件；仅选择 Translate for Zotero 兼容模式时需要先安装：
-  https://github.com/windingwind/zotero-pdf-translate
+- 默认引擎需要安装并启用 [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate)。内置 Google 和 Bing 可独立使用。
 
 ## 安装
 
@@ -47,20 +56,20 @@
 3. 等待 Zotero 生成阅读模式结构化文本。
 4. 中文译文会显示在对应英文段落下方。
 5. 点击 **🔄** 可重新调度翻译。
-6. 点击 **🖨️** 可导出双语 PDF。
+6. 在设置中选择 **上下对照**（默认）或 **左右对照（原 PDF｜译文）**，然后点 **🖨️** 将 PDF 存为文献附件。左右对照逐页配对。左侧保留原始 PDF 的版面、图表及可选文字，右侧为该页重新排版的可搜索译文。右侧译文过长时自动续页，并在左侧重复对应原页。默认使用 Zotero 内置能力，无需安装排版服务。
 
 可以配置：
 
 - 内置统一翻译引擎管理：各服务独立密钥、模型、端点、领域及测试；
 - 兼容 Translate for Zotero / Ollama；
-- 不翻译末尾页数；
+- 翻译范围与非参考文献模式跳过的末尾页数；
 - 最大并发请求；
 - 请求启动间隔；
 - 单次请求最大字符数；
 - 单次合并段落数；
 - 请求超时；
 - 连续失败后暂停；
-- 翻译缓存清理。
+- 翻译缓存段数与清理。
 
 ## 内置翻译引擎设置
 
@@ -72,7 +81,7 @@
 
 ## PDF 解析与导出（预览版）
 
-Zotero 设置 → 中英对照 → 原始 PDF 解析，选择解析引擎。PDF.js 默认，不要求云端密钥。Docling 需本机运行 Python 服务（见 docs/native-pdfjs-docling.md）。
+🀄 开启上下双语阅读，🖨️ 导出。解析引擎收在「解析和导出设置」下。PDF.js 默认，不要求云端密钥。Docling 需本机运行 Python 服务（见 docs/native-pdfjs-docling.md）。
 
 | 解析器 | 配置 | 申请/API 文档 |
 | --- | --- | --- |
@@ -84,11 +93,9 @@ Zotero 设置 → 中英对照 → 原始 PDF 解析，选择解析引擎。PDF.
 
 各 API Key 独立保存在 Zotero 本地偏好中（非系统钥匙串），可清空。云服务每次上传原始 PDF 前需用户确认；可能计费，敏感未发表资料建议本地解析。初版云解析限制 30 MB；MinerU 使用 v4 批量上传与任务轮询，Mistral 返回每页 OCR Markdown，LlamaParse 使用 v2 文件解析任务。解析错误可显式回退本地 PDF.js；尚未使用真实付费账户完成全部端到端验证。PDF 解析和文字翻译是不同服务，需分别配置。
 
-**📑 原版保真双语导出**：先打印按原始页码组织的可搜索双语译文，再使用 pdf-lib 直接复制原始 PDF 页面并合并。成品前部是完整原始 PDF，后部是双语译文；不再将原始页转成 JPEG。保留原页尺寸、旋转、内容流、字体和嵌入图片；新文件不保证保留原文档级签名、书签、表单和跨页链接。原始附件不变。
+**MinerU 阅读回退**：在「设置 → 中英对照 → 解析和导出设置」选择 MinerU，填写 Token。导出会复用已完成的解析和译文。上下版导出解析后的双语文本，左右版在左侧保留带图表的原始页面。
 
-**◫ 左右对照 PDF**：打开普通 PDF 页面，点击工具栏 ◫。左侧保留原始 PDF 的矢量页面（含可见图表），右侧显示对应原页的中文重排译文。每个原页独立分页；长译文自动续页并重复左侧原页，避免裁切。未翻译段落显式标记并保留原文；跳过尾页设置仍然有效。输出为一个宽版 PDF 附件，可在 Zotero 中再次打开。该模式不是原位覆盖翻译，右侧不会复刻原文图表布局，批注/链接/签名等交互对象不保证保留。无需安装 PDF2zh 或 Python（选 Docling 才需要本地服务）。
-
-**🖨️ 旧版逐段重排导出**：清理读者视口的固定高度、裁切与位置样式，统一 A4 边距，等待 HTML 完全加载才打印。默认附加完整原始 PDF 作为附录；如果检测到漏图，继续导出时必须保留原始 PDF 附录。附录并非将缺失 Figure 插入其正文中的正确位置。若希望减小文件，可在设置中关闭默认附录（检测到疑似漏图时仍会提示附录）。
+**🖨️ Zotero 阅读模式上下对照导出**：清理读者视口的固定高度、裁切与位置样式，统一 A4 边距，等待 HTML 完全加载才打印。导出会主动渲染尚未滚动到的 Zotero 原始 PDF 图表区域，并将图片直接嵌入双语正文。
 
 PDF 合并后重新读取校验总页数，导入 Zotero 为新附件；不覆盖原文件。CI 包含真实打印样本的独立渲染检查。
 
@@ -97,7 +104,7 @@ PDF 合并后重新读取校验总页数，导入 Zotero 为新附件；不覆�
 - Google 与 Bing 免密钥方案通过非官方网页翻译端点联网请求，**不是官方的有服务等级保证的 API**；可能受服务规则、网络地区、速率限制或端点调整影响。不能保证无限量或永久可用。
 - 为降低限流及避免跨段错位，内置服务固定逐段串行，Google 最短请求间隔 750 毫秒，Bing 最短间隔 300 毫秒。可在设置中继续调大请求间隔。
 - 文献正文会发送给所选择的在线翻译服务。敏感、未发表或受限制的数据请使用本地 Ollama 并自行核对隐私要求。
-- 已经选择 Translate for Zotero / Ollama 的旧用户设置会保留；新安装默认 Google。
+- 升级会保留已保存的翻译引擎。没有保存引擎选择时，默认使用 Translate for Zotero。
 - 内置段落引擎覆盖免费、商业 API、自托管三类。各厂商的账户、付费额度、官方 API 授权及实际可用性仍由厂商决定。
 - 部分词典（Cambridge、Collins、Bing Dict 等）只接受单词，不适合论文全文段落翻译，故不提供段落模式。Pot 只显示外部弹窗而不会返回译文。CNKI 和 Iciba 网页加密适配已集成，但服务可能触发人工验证或改变反爬参数，因此需要单独进行真实可用性测试。
 - API Key 分服务保存在本地 Zotero 偏好配置中，不是 macOS 钥匙串加密存储；不要共享配置文件。更换密钥或模型会自动变更缓存命名空间。
@@ -141,7 +148,12 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 
 - [Bob](https://github.com/ripperhe/Bob)：参考产品的多服务选择与 OCR 交互；Bob 并非开源软件，本项目未复用其代码。
 - [Easydict](https://github.com/tisfeng/Easydict)（GPL-3.0）：参考多服务独立配置及开箱即用的体验；本次未复制代码。
-- [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate)（AGPL-3.0）：此前内置引擎分支包含参考及改编的服务适配器，保留相应源码署名和许可证。
+- [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate)（AGPL-3.0）及贡献者提供了本版参考和改编的服务适配器，来源在相应源码文件中注明。
 - [ReadIN 译读](https://github.com/phoenix8701-ctrl/readin-yidu)（AGPL-3.0）：参考整页双语阅读及回存 Zotero 的交互；本次未复制代码。
-- [Zotero PDF2zh](https://github.com/guaguastandup/zotero-pdf2zh)（AGPL-3.0）：参考 PDF 左右对照和附件导出设计；本次未复制其代码或调用其服务。
-- [pdf-lib](https://github.com/Hopding/pdf-lib)（MIT）：实际打包依赖，用于原页复制与合并；相关第三方许可证见 addon/content/licenses/pdf-export-dependencies.txt。
+- [Zotero Figure](https://github.com/MuiseDestiny/zotero-figure) 提供了从原 PDF 按区域裁图和按需渲染的设计参考。
+- [Zotero Interlinear](https://github.com/Muanyan-mjq/zotero-interlinear) 与 [ChanceZhangcr 的 Bilingual Reader](https://github.com/ChanceZhangcr/zotero-bilingual-reader) 提供了阅读模式重排、左右配对与可搜索 PDF 导出的设计参考。
+- [Zotero PDF2zh（guaguastandup 及贡献者）](https://github.com/guaguastandup/zotero-pdf2zh)（AGPL-3.0）：曾用于项目的左右对照导出实现。
+- [PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next) 与 [BabelDOC](https://github.com/funstory-ai/BabelDOC)：曾为 Zotero PDF2zh 集成提供排版翻译引擎。
+- [Zotero 的 Make It Red 示例](https://github.com/zotero/make-it-red) 提供了插件启动代码的基础。
+- [Google Noto Emoji](https://github.com/googlefonts/noto-emoji)（Apache-2.0）提供了麻将红中图标。
+- [pdf-lib](https://github.com/Hopding/pdf-lib)（MIT）：实际打包依赖，用于嵌入原始 PDF 页面；相关第三方许可证见 addon/content/licenses/pdf-export-dependencies.txt。

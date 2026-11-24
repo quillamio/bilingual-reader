@@ -1,6 +1,7 @@
-import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName, getExportOriginalAppendix } from "./pdfExportUtils";
-import { freezePDFExportImages } from "./pdfExportAssets";
-import { appendOriginalPDF } from "./pdfVectorExport";
+import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAssets";
+import { getPDFExportLayout, getTranslationPageCount } from "./settings";
+import type { TranslatedPDFPage } from "./pdfNativeHtml";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -100,7 +101,9 @@ function getTranslationStats(doc: Document): { done: number; unfinished: number 
   return { done, unfinished };
 }
 
-export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTMLElement): string {
+export function buildExportHTML(
+  doc: Document, title: string, preparedRoot?: HTMLElement,
+): string {
   const sourceRoot = doc.querySelector("#sdt-content") as HTMLElement | null;
   if (!sourceRoot) throw new Error("无法读取当前 Zotero 阅读模式正文。");
 
@@ -234,6 +237,8 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
   }
   figure { margin: 8pt 0; max-width: 100%; overflow: visible; }
   figure img, figure svg, figure canvas { max-height: 225mm !important; }
+  .sdt-source-crop-page { max-width: 100%; aspect-ratio: auto !important; }
+  .sdt-source-crop-page img { display: block; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -363,7 +368,9 @@ function getHiddenBrowserConstructor(): any {
   return module.HiddenBrowser;
 }
 
-export async function printHTMLToPDF(html: string, tempFile: any): Promise<void> {
+export async function printHTMLToPDF(
+  html: string, tempFile: any,
+): Promise<void> {
   const mainWindow = Zotero.getMainWindow() as any;
   const printUtils = mainWindow?.PrintUtils;
   if (!printUtils?.getPrintSettings) {
@@ -432,8 +439,50 @@ export async function printHTMLToPDF(html: string, tempFile: any): Promise<void>
   }
 }
 
-export async function exportBilingualPDF(reader: any): Promise<void> {
+/** Read already-translated SDT paragraphs only when their physical page mapping is available. */
+function getReadingTranslationPages(reader: any, doc: Document): TranslatedPDFPage[] | null {
+  let pageCount: number;
+  try {
+    const view = getActiveSDTView(reader);
+    pageCount = (view?.getData?.()?.structure || view?._structure)?.catalog?.pages?.length;
+  } catch (_) {
+    return null;
+  }
+  if (!Number.isSafeInteger(pageCount) || pageCount < 1) return null;
+  const cutoff = getTranslationPageCount(pageCount);
+  const pages = Array.from({ length: pageCount }, (_, pageIndex): TranslatedPDFPage => ({
+    pageIndex, paragraphs: [],
+    emptyMessage: pageIndex >= cutoff ? "已按设置跳过末尾页翻译。" : undefined,
+  }));
+  let done = 0;
+  for (const target of doc.querySelectorAll<HTMLElement>(`#sdt-content .${TRANSLATION_CLASS}[data-state="done"]`)) {
+    const text = target.textContent?.trim();
+    if (!text) continue;
+    const page = pages[Number(target.dataset.sourcePage) - 1];
+    if (!page) return null;
+    const heading = target.previousElementSibling?.matches("h1,h2,h3,h4,h5,h6");
+    page.paragraphs.push({ text, heading });
+    done++;
+  }
+  return done ? pages : null;
+}
+
+export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null): Promise<void> {
+  const { hasMinerUReadingFallback, getMinerUReadingResult } = await import("./pdfNativeReadingPanel");
+  const fallback = getMinerUReadingResult(reader);
+  const layout = getPDFExportLayout();
+  if (hasMinerUReadingFallback(reader) && !fallback) {
+    showMessage(reader, "MinerU 双语阅读尚无可导出的译文。请等到翻译完成。");
+    return;
+  }
   const doc = getSDTDocument(reader);
+  const pages = layout === "side-by-side" && doc ? getReadingTranslationPages(reader, doc) : null;
+  if (fallback || (layout === "side-by-side" && !pages)) {
+    const { exportNativePDFBilingual } = await import("./pdfNativeExport");
+    await exportNativePDFBilingual(reader, button, fallback, layout);
+    return;
+  }
+
   if (!doc?.querySelector("#sdt-content")) {
     showMessage(reader, "请先在 Zotero 阅读模式中开启中英对照，再导出 PDF。");
     return;
@@ -458,8 +507,8 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   if (
     !confirmMessage(
       reader,
-      "将生成一个新的中英对照 PDF，并作为附件加入这篇文献的 Zotero 条目。" +
-      (getExportOriginalAppendix() ? "\n将附加完整原始 PDF 页面，避免科研图表漏失。" : "") + "\n\n继续导出？",
+      (pages ? "左侧保留原始 PDF 页面，右侧放该页译文。"
+        : "将生成一个新的上下对照 PDF。") + "\n导出后将作为附件加入这篇文献。\n\n继续导出？",
     )
   ) {
     return;
@@ -477,6 +526,18 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   const parentTitle = String(
     parentItem?.getField?.("title") || sourceAttachment.getField?.("title") || "文献",
   );
+  if (pages) {
+    try {
+      const { saveSideBySidePDF } = await import("./pdfNativeExport");
+      await saveSideBySidePDF(sourceAttachment, pages, button);
+      showMessage(reader, "左右对照导出成功。左侧为原始 PDF，右侧为译文。");
+    } catch (error) {
+      Zotero.logError(error as Error);
+      showMessage(reader, `左右对照导出失败：${(error as Error)?.message || String(error)}`);
+    }
+    return;
+  }
+
   const tempFile = Zotero.getTempDirectory();
   // A stable .pdf suffix must not depend on the length of the article title.
   tempFile.append(`bilingual-reader-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.pdf`);
@@ -487,33 +548,17 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
     // A timestamped file should normally not exist.
   }
 
-  const combinedFile = Zotero.getTempDirectory();
-  combinedFile.append("br-combined-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".pdf");
-  let importedAttachment: any = null;
-  let preserveOriginal = getExportOriginalAppendix();
   try {
     const liveRoot = doc.querySelector("#sdt-content") as HTMLElement;
+    await preparePDFExportFigures(getActiveSDTView(reader), liveRoot, reader);
     const exportClone = liveRoot.cloneNode(true) as HTMLElement;
     const assets = await freezePDFExportImages(liveRoot, exportClone);
-    if (assets.failed || assets.absentFigureCaptions) {
-      const parts: string[] = [];
-      if (assets.failed) parts.push(`${assets.failed} 个图片/Canvas 资源无法直接嵌入`);
-      if (assets.absentFigureCaptions) {
-        parts.push(`${assets.absentFigureCaptions} 个图注附近没有发现可导出的图片元素`);
-      }
-      if (!confirmMessage(reader,
-        `检测到可能缺失的图片：${parts.join("；")}。\n\n` +
-        "将保留完整原始 PDF 页面作为附录，确保原图可查阅；重排正文中可能仍缺图。是否继续？")) {
-        return;
-      }
-      preserveOriginal = true;
-    }
+    if ((assets.failed || assets.absentFigureCaptions) && !confirmMessage(reader,
+      `有 ${assets.failed} 个图像资源无法嵌入，${assets.absentFigureCaptions} 个图注未找到对应图片。是否继续导出已读取的内容？`)) return;
+
     const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
     await printHTMLToPDF(html, tempFile);
-    if (preserveOriginal) {
-      await appendOriginalPDF(tempFile, sourceAttachment, combinedFile, false);
-    }
-    importedAttachment = await importExportedPDF(preserveOriginal ? combinedFile : tempFile, sourceAttachment);
+    await importExportedPDF(tempFile, sourceAttachment);
   } catch (error: any) {
     Zotero.logError(error as Error);
     showMessage(reader, `导出中英对照 PDF 失败：${error?.message || String(error)}`);
@@ -521,16 +566,12 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   } finally {
     try {
       if (tempFile.exists()) tempFile.remove(false);
-      if (combinedFile.exists()) combinedFile.remove(false);
     } catch (_) {
       // The imported Zotero attachment has already copied the file.
     }
   }
 
-  if (importedAttachment) {
-    showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。" +
-      (preserveOriginal ? "\n已附加完整原始 PDF 页面，原始图表可在附录查阅。" : ""));
-  }
+  showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。");
 }
 
 export function renderReaderExportButton(event: any): void {
@@ -547,7 +588,7 @@ export function renderReaderExportButton(event: any): void {
         (button) => {
           if (button.disabled) return;
           button.disabled = true;
-          void exportBilingualPDF(reader).finally(() => {
+          void exportBilingualPDF(reader, button).finally(() => {
             button.disabled = false;
           });
         },

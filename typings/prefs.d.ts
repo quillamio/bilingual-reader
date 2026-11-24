@@ -8,6 +8,9 @@ declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
       "engine": string;
+      "native.backend": string;
+      "export.layout": string;
+      "native.doclingURL": string;
       "ollama.url": string;
       "ollama.model": string;
       "requestGapMs": number;
@@ -17,6 +20,8 @@ declare namespace _ZoteroTypes {
       "maxConsecutiveErrors": number;
       "requestTimeoutMs": number;
       "skipLastPages": number;
+      "translateAllPages": boolean;
+      "cacheMaxEntries": number;
     };
   }
 }

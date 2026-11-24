@@ -57,22 +57,17 @@ test("Docling output must contain valid page indices and sizes", () => {
   assert.equal(valid.source, "docling");
   assert.equal(valid.pages[0].blocks[0].type, "caption");
 });
-test("native HTML keeps original JPEG pages, searchable text and escaped input", () => {
+test("native stacked HTML keeps searchable original and translated text and escapes input", () => {
   const html = buildNativeBilingualHTML([
-    { pageIndex: 0, image: "data:image/jpeg;base64,QUJDREVG",
+    { pageIndex: 0,
       blocks: [{ block: { id: "b", pageIndex: 0, order: 0, type: "paragraph",
         source: "pdfjs", bbox: { left: 0, right: 1, bottom: 0, top: 1 },
         text: "<script>English & Chinese</script>" }, translation: "中文<安全>" }] },
   ], "A paper & B", "pdfjs");
-  assert.match(html, /data:image\/jpeg;base64,QUJDREVG/u);
+  assert.doesNotMatch(html, /<img|original-page/u);
   assert.match(html, /page-break-after:always/u);
   assert.match(html, /data-parser="pdfjs"/u);
   assert.match(html, /&lt;script&gt;English &amp; Chinese&lt;\/script&gt;/u);
   assert.match(html, /中文&lt;安全&gt;/u);
   assert.doesNotMatch(html, /<script>/u);
-});
-test("export never silently omits a source page whose image is missing", () => {
-  assert.throws(() => buildNativeBilingualHTML([
-    { pageIndex: 0, image: "", blocks: [] },
-  ], "Invalid", "pdfjs"), /原始页面图像缺失/u);
 });

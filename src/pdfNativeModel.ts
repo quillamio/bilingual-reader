@@ -36,6 +36,22 @@ export interface NativeDocument {
   pages: NativePage[];
   warnings: string[];
 }
+export const PDF_PARSER_NAMES: Record<NativeParser, string> = {
+  pdfjs: "PDF.js",
+  docling: "Docling",
+  mineru: "MinerU",
+  mistral: "Mistral OCR",
+  llamaparse: "LlamaParse",
+};
+
+export function describePDFParser(document: NativeDocument, selected: NativeParser): string {
+  const actual = PDF_PARSER_NAMES[document.source];
+  if (selected !== document.source) return `解析：${PDF_PARSER_NAMES[selected]} → ${actual}（已回退）`;
+  if (selected === "pdfjs") return "解析：PDF.js";
+  const fallback = document.pages.filter((page) => page.blocks.some((block) => block.source === "pdfjs")).length;
+  return `解析：${actual}` + (fallback ? ` · ${fallback} 页使用 PDF.js 补位` : "");
+}
+
 export interface PDFJSTextItem {
   str: string;
   transform: number[];

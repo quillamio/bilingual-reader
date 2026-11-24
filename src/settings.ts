@@ -3,6 +3,7 @@ import { isManagedService, getServiceRevision } from "./serviceCatalog";
 const BASE = "extensions.zotero.bilingualreader";
 
 export type TranslationEngine = string;
+export type PDFExportLayout = "stacked" | "side-by-side";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
@@ -13,7 +14,10 @@ export const DEFAULT_MAX_BATCH_PARAGRAPHS = 6;
 export const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 export const DEFAULT_SKIP_LAST_PAGES = 1;
+const DEFAULT_CACHE_MAX_ENTRIES = 1500;
+const MAX_INTEGER_PREF = 2147483647;
 
+const DEFAULT_ENGINE = "pdftranslate";
 const ENGINE_PREF = `${BASE}.engine`;
 const OLLAMA_URL_PREF = `${BASE}.ollama.url`;
 const OLLAMA_MODEL_PREF = `${BASE}.ollama.model`;
@@ -24,6 +28,9 @@ const MAX_BATCH_PARAGRAPHS_PREF = `${BASE}.maxBatchParagraphs`;
 const MAX_ERRORS_PREF = `${BASE}.maxConsecutiveErrors`;
 const REQUEST_TIMEOUT_PREF = `${BASE}.requestTimeoutMs`;
 const SKIP_LAST_PAGES_PREF = `${BASE}.skipLastPages`;
+const TRANSLATE_ALL_PAGES_PREF = `${BASE}.translateAllPages`;
+const CACHE_MAX_ENTRIES_PREF = `${BASE}.cacheMaxEntries`;
+const EXPORT_LAYOUT_PREF = `${BASE}.export.layout`;
 
 function getStringPref(key: string, fallback: string): string {
   const value = (Zotero.Prefs as any).get(key, true);
@@ -47,10 +54,10 @@ function setNumberPref(key: string, value: number, min: number, max: number): vo
 }
 
 export function getEngine(): TranslationEngine {
-  const value = getStringPref(ENGINE_PREF, "google");
-  return value === "ollama" || value === "pdftranslate" || isManagedService(value)
+  const value = getStringPref(ENGINE_PREF, DEFAULT_ENGINE);
+  return value === "ollama" || value === DEFAULT_ENGINE || isManagedService(value)
     ? value
-    : "google";
+    : DEFAULT_ENGINE;
 }
 
 export function setEngine(engine: TranslationEngine): void {
@@ -127,6 +134,37 @@ export function getSkipLastPages(): number {
 
 export function setSkipLastPages(value: number): void {
   setNumberPref(SKIP_LAST_PAGES_PREF, value, 0, 50);
+}
+
+export function getTranslateAllPages(): boolean {
+  // A saved zero from earlier versions already means all pages.
+  return Zotero.Prefs.get(TRANSLATE_ALL_PAGES_PREF, true) === true || getSkipLastPages() === 0;
+}
+
+export function setTranslateAllPages(enabled: boolean): void {
+  if (!enabled && getSkipLastPages() === 0) setSkipLastPages(DEFAULT_SKIP_LAST_PAGES);
+  Zotero.Prefs.set(TRANSLATE_ALL_PAGES_PREF, enabled, true);
+}
+
+export function getTranslationPageCount(totalPages: number): number {
+  if (getTranslateAllPages()) return totalPages;
+  return Math.max(Math.min(1, totalPages), totalPages - getSkipLastPages());
+}
+
+export function getCacheMaxEntries(): number {
+  return getNumberPref(CACHE_MAX_ENTRIES_PREF, DEFAULT_CACHE_MAX_ENTRIES, 0, MAX_INTEGER_PREF);
+}
+
+export function setCacheMaxEntries(count: number): void {
+  setNumberPref(CACHE_MAX_ENTRIES_PREF, count, 0, MAX_INTEGER_PREF);
+}
+
+export function getPDFExportLayout(): PDFExportLayout {
+  return getStringPref(EXPORT_LAYOUT_PREF, "stacked") === "side-by-side" ? "side-by-side" : "stacked";
+}
+
+export function setPDFExportLayout(layout: string): void {
+  setStringPref(EXPORT_LAYOUT_PREF, layout === "side-by-side" ? layout : "stacked");
 }
 
 export function getResolvedPDFTranslateService(): string {

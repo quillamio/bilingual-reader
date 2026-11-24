@@ -124,11 +124,3 @@ export function configureBilingualPDFPrintSettings(settings: any): void {
   if ("ignoreUnwriteableMargins" in settings) settings.ignoreUnwriteableMargins = true;
   if ("usePageRuleSizeAsPaperSize" in settings) settings.usePageRuleSizeAsPaperSize = true;
 }
-
-const APPENDIX_PREF = "extensions.zotero.bilingualreader.export.originalAppendix";
-export function getExportOriginalAppendix(): boolean {
-  return (Zotero.Prefs as any).get(APPENDIX_PREF, true) !== false;
-}
-export function setExportOriginalAppendix(value: boolean): void {
-  (Zotero.Prefs as any).set(APPENDIX_PREF, value, true);
-}

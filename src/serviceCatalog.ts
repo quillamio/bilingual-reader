@@ -29,16 +29,16 @@ const model = (defaultValue: string): ServiceField => ({
 const prompt: ServiceField = { key: "prompt", label: "自定义系统提示词（可选）" };
 const gptFields = () => [key(), endpoint("https://api.openai.com/v1/chat/completions"), model("gpt-4.1-mini"), prompt];
 export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
-  { id: "google", label: "Google 翻译（默认）", group: "free", fields: [] },
+  { id: "google", label: "Google 翻译", group: "free", fields: [] },
   { id: "googleapi", label: "Google 翻译（备用）", group: "free", fields: [] },
   { id: "bing", label: "Bing 翻译（网页）", group: "free", fields: [] },
   { id: "youdao", label: "有道翻译（网页）", group: "free", fields: [] },
   { id: "huoshanweb", label: "火山翻译（网页）", group: "free", fields: [] },
   { id: "tencenttransmart", label: "腾讯 Transmart（网页）", group: "free", fields: [] },
-  { id: "mymemory", label: "MyMemory", group: "free", fields: [{ key: "email", label: "邮箱（可选，提高额度）" }] },
-  { id: "deeplx", label: "DeepL 网页（非官方）", group: "free", fields: [endpoint("https://www2.deepl.com/jsonrpc")] },
-  { id: "cnki", label: "知网 CNKI 学术翻译（非官方）", group: "free", fields: [] },
-  { id: "iciba", label: "金山词霸网页翻译（非官方）", group: "free", fields: [] },
+  { id: "mymemory", label: "MyMemory", group: "free", help: "短文本额度或请求频率有限，整篇 PDF 翻译不推荐。", fields: [{ key: "email", label: "邮箱（可选，提高额度）" }] },
+  { id: "deeplx", label: "DeepL 网页（非官方）", group: "free", help: "短文本额度或请求频率有限，整篇 PDF 翻译不推荐。", fields: [endpoint("https://www2.deepl.com/jsonrpc")] },
+  { id: "cnki", label: "知网 CNKI 学术翻译（非官方）", group: "free", help: "短文本额度或请求频率有限，整篇 PDF 翻译不推荐。", fields: [] },
+  { id: "iciba", label: "金山词霸网页翻译（非官方）", group: "free", help: "短文本额度或请求频率有限，整篇 PDF 翻译不推荐。", fields: [] },
   { id: "baidu", label: "百度翻译", group: "api", fields: [key("AppID#密钥#Action（Action 可省略）")] },
   { id: "baidufield", label: "百度领域翻译", group: "api", fields: [key("AppID#密钥#领域代码")] },
   { id: "caiyun", label: "彩云小译", group: "api", fields: [key("彩云 Token")] },
@@ -47,6 +47,7 @@ export const SERVICE_CATALOG: readonly ServiceDefinition[] = [
   { id: "microsoft", label: "Microsoft Translator（Azure）", group: "api", fields: [
     key("Azure 翻译密钥"), { key: "region", label: "Azure Region（可选）" },
   ] },
+  { id: "glm47flash", label: "智谱 GLM-4.7-Flash", group: "api", fields: [key("智谱 API Key")] },
   { id: "openai", label: "OpenAI Chat Completions", group: "api", fields: gptFields() },
   { id: "customgpt1", label: "自定义 GPT 接口 1", group: "api", fields: gptFields() },
   { id: "customgpt2", label: "自定义 GPT 接口 2", group: "api", fields: gptFields() },

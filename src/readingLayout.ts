@@ -1,3 +1,5 @@
+import { observeReadingFigures } from "./pdfReadingFigures";
+
 interface LayoutObserver {
   refresh: () => void;
   dispose: () => void;
@@ -7,12 +9,13 @@ const layouts = new WeakMap<Document, LayoutObserver>();
 const activeLayouts = new Set<LayoutObserver>();
 
 /** Keep Zotero's native annotation ranges/geometry in sync with inserted text. */
-export function observeReadingLayout(view: any, doc: Document): void {
+export function observeReadingLayout(view: any, doc: Document, reader?: any): void {
   if (layouts.has(doc)) return;
   const root = doc.querySelector("#sdt-content");
   const win = doc.defaultView;
   if (!root || !win) return;
 
+  const disposeFigures = reader ? observeReadingFigures(reader, view, root, win) : undefined;
   let disposed = false;
   let frame: number | undefined;
   const refresh = () => {
@@ -67,6 +70,7 @@ export function observeReadingLayout(view: any, doc: Document): void {
       layouts.delete(doc);
       activeLayouts.delete(observer);
       try {
+        disposeFigures?.();
         mutations.disconnect();
         resizes?.disconnect();
         if (frame !== undefined) win.cancelAnimationFrame(frame);

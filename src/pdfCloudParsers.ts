@@ -38,10 +38,10 @@ function binary(bytes: Uint8Array): ArrayBuffer {
 }
 async function request(method: "GET" | "POST" | "PUT", url: string,
   body?: ArrayBuffer, headers: Record<string, string> = {},
-  responseType: "json" | "arraybuffer" | "text" = "json"): Promise<any> {
+  responseType: "json" | "arraybuffer" | "text" = "json", timeout = 180000): Promise<any> {
   try {
     const xhr = await Zotero.HTTP.request(method, url, {
-      body, headers, responseType, timeout: 180000, followRedirects: false,
+      body, headers, responseType, timeout, followRedirects: false,
       noCache: true, debug: false,
     } as any);
     if (xhr.status < 200 || xhr.status >= 300) throw new Error("HTTP " + xhr.status);
@@ -53,11 +53,15 @@ async function request(method: "GET" | "POST" | "PUT", url: string,
     throw new Error("PDF 解析服务请求失败" + (status >= 400 && status < 600 ? "（HTTP " + status + "）" : "（网络或响应异常）") + "。");
   }
 }
-function json(method: "GET" | "POST", url: string, key: string, payload?: unknown): Promise<any> {
+function json(method: "GET" | "POST", url: string, key: string, payload?: unknown, timeout?: number): Promise<any> {
   return request(method, url, payload === undefined ? undefined : binary(encode(JSON.stringify(payload))),
-    { Authorization: "Bearer " + key, "Content-Type": "application/json", Accept: "application/json" });
+    { Authorization: "Bearer " + key, "Content-Type": "application/json", Accept: "application/json" },
+    "json", timeout);
 }
 function mineruData(result: any): any {
+  if (result?.code === "A0202") throw new Error("MinerU Token 无效。");
+  if (result?.code === "A0211") throw new Error("MinerU Token 已过期。");
+  if (result?.code === -60018) throw new Error("MinerU 今日解析额度已用完。");
   if (result?.code !== 0 || !result.data) throw new Error("MinerU API 返回失败状态；请检查 Token 和额度。");
   return result.data;
 }
@@ -137,27 +141,68 @@ async function poll<T>(read: () => Promise<T | undefined>,
   }
   throw new Error("PDF 解析任务超时；请在服务商后台查看任务状态，避免重复计费。");
 }
-async function mineru(bytes: Uint8Array, key: string, model: string, base: NativeDocument,
-  check?: () => boolean): Promise<NativeDocument> {
+const MINERU_API = "https://mineru.net/api/v4";
+
+function mineruToken(key: string): string {
+  return key.replace(/^Bearer\s+/iu, "").trim();
+}
+
+async function requestMinerUUpload(token: string, model: string, name: string, timeout?: number):
+  Promise<{ batchID: string; uploadURL: string }> {
+  if (!token) throw new Error("请先填写 MinerU Token。");
   if (!["vlm", "pipeline"].includes(model)) throw new Error("MinerU 模型只能选择 vlm 或 pipeline。");
-  const root = "https://mineru.net/api/v4";
-  const data = mineruData(await json("POST", root + "/file-urls/batch", key, {
-    files: [{ name: "document.pdf", is_ocr: true }],
+  const data = mineruData(await json("POST", MINERU_API + "/file-urls/batch", token, {
+    files: [{ name, is_ocr: true }],
     model_version: model, enable_formula: true, enable_table: true, language: "en",
-  }));
-  if (typeof data.batch_id !== "string" || data.file_urls?.length !== 1) {
+  }, timeout));
+  if (typeof data.batch_id !== "string" || !data.batch_id || data.file_urls?.length !== 1) {
     throw new Error("MinerU 上传任务返回格式异常。");
   }
+  return { batchID: data.batch_id, uploadURL: signedURL(data.file_urls[0]) };
+}
+
+export async function checkMinerUConnection(): Promise<void> {
+  await requestMinerUUpload(mineruToken(getCloudKey("mineru")), getCloudModel("mineru"), "connection-test.pdf", 15000);
+}
+
+async function fetchMinerUStorage(url: string, body?: ArrayBuffer): Promise<ArrayBuffer | undefined> {
+  const win = Zotero.getMainWindow();
+  const abort = new win.AbortController();
+  const timer = setTimeout(() => abort.abort(), 180000);
+  const stage = body ? "上传原始 PDF" : "下载解析结果";
+  try {
+    // An ArrayBuffer has no implicit media type in fetch. Zotero.HTTP adds a
+    // form Content-Type to request bodies, which invalidates the signed PUT.
+    const response = await win.fetch(url, {
+      method: body ? "PUT" : "GET", body, credentials: "omit",
+      redirect: "error", cache: "no-store", signal: abort.signal,
+    });
+    if (!response.ok) throw new Error("MinerU " + stage + "失败（HTTP " + response.status + "）。");
+    if (!body) return await response.arrayBuffer();
+  } catch (error) {
+    const message = (error as Error).message;
+    if (/^MinerU .*HTTP /u.test(message)) throw error;
+    throw new Error("MinerU " + stage + "失败（网络或响应异常）。");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function mineru(bytes: Uint8Array, key: string, model: string, base: NativeDocument,
+  check?: () => boolean): Promise<NativeDocument> {
+  const token = mineruToken(key);
+  const { batchID, uploadURL } = await requestMinerUUpload(token, model, "document.pdf");
   cancelled(check);
-  await request("PUT", signedURL(data.file_urls[0]), binary(bytes), {}, "text");
+  await fetchMinerUStorage(uploadURL, binary(bytes));
   const resultURL = await poll<string>(async () => {
-    const current = mineruData(await json("GET", root + "/extract-results/batch/" +
-      encodeURIComponent(data.batch_id), key));
+    const current = mineruData(await json("GET", MINERU_API + "/extract-results/batch/" +
+      encodeURIComponent(batchID), token));
     const row = current.extract_result?.[0];
     if (row?.state === "failed") throw new Error("MinerU 解析任务失败。");
     return row?.state === "done" ? signedURL(row.full_zip_url) : undefined;
   }, check);
-  const zip = await request("GET", resultURL, undefined, {}, "arraybuffer");
+  const zip = await fetchMinerUStorage(resultURL);
+  if (!zip) throw new Error("MinerU 未返回解析文件。");
   cancelled(check);
   return normalizeMinerU(base, await readMinerUZip(zip));
 }

@@ -104,7 +104,7 @@ async function translateWithGoogle(
     return parseGoogleTranslation(xhr.response);
   } catch (error) {
     if (/429|rate.limit|too many requests/iu.test(String(error))) {
-      throw new Error("Google 翻译请求过于频繁（429）。请降低并发或延长请求间隔。");
+      throw new Error("Google 翻译当前受限（HTTP 429）。请稍后重试，或在设置中选用其他翻译引擎。");
     }
     throw error;
   }

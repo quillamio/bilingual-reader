@@ -1,3 +1,5 @@
+import { getCacheMaxEntries } from "./settings";
+
 const BASE = "extensions.zotero.bilingualreader";
 const TARGET_LANG = "zh-CN";
 const CACHE_PREFIX = `${BASE}.cache.v4.`;
@@ -6,7 +8,6 @@ const CACHE_INDEX_KEY = `${CACHE_PREFIX}index`;
 
 // Long translations do not belong in preferences indefinitely. Keep the
 // existing lightweight storage format, but cap it to a predictable footprint.
-const MAX_CACHE_ENTRIES = 1500;
 const MAX_CACHE_CHARS = 6_000_000;
 
 interface CacheIndexEntry {
@@ -118,18 +119,25 @@ function touchCacheEntry(key: string, chars: number): void {
   index.push({ key, chars, lastAccess: Date.now() });
 }
 
-function pruneCache(): void {
+function pruneCache(maxEntries: number): boolean {
   const index = getCacheIndex();
   let totalChars = index.reduce((sum, entry) => sum + Math.max(0, entry.chars), 0);
-  if (index.length <= MAX_CACHE_ENTRIES && totalChars <= MAX_CACHE_CHARS) return;
+  if (index.length <= maxEntries && totalChars <= MAX_CACHE_CHARS) return false;
 
   index.sort((a, b) => a.lastAccess - b.lastAccess);
-  while (index.length > MAX_CACHE_ENTRIES || totalChars > MAX_CACHE_CHARS) {
-    const oldest = index.shift();
-    if (!oldest) break;
+  let removeCount = 0;
+  while (removeCount < index.length &&
+         (index.length - removeCount > maxEntries || totalChars > MAX_CACHE_CHARS)) {
+    const oldest = index[removeCount++];
     totalChars -= Math.max(0, oldest.chars);
     prefClear(oldest.key);
   }
+  index.splice(0, removeCount);
+  return true;
+}
+
+export function enforceTranslationCacheLimit(): void {
+  if (pruneCache(getCacheMaxEntries())) persistCacheIndex();
 }
 
 export function loadCachedTranslation(
@@ -138,6 +146,7 @@ export function loadCachedTranslation(
   engineTag: string,
   isFailureText: (text: string) => boolean,
 ): string | undefined {
+  if (getCacheMaxEntries() === 0) return undefined;
   const key = cacheKey(itemKey, sourceText, engineTag);
   let value = prefGet(key);
 
@@ -172,12 +181,13 @@ export function saveCachedTranslation(
   engineTag: string,
   isFailureText: (text: string) => boolean,
 ): void {
-  if (isFailureText(translation)) return;
+  const maxEntries = getCacheMaxEntries();
+  if (maxEntries === 0 || isFailureText(translation)) return;
 
   const key = cacheKey(itemKey, sourceText, engineTag);
   prefSet(key, translation);
   touchCacheEntry(key, translation.length);
-  pruneCache();
+  pruneCache(maxEntries);
   schedulePersistCacheIndex();
 }
 

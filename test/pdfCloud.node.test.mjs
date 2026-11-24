@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
 import { normalizeMinerU, normalizeMarkdownPages } from "../src/pdfCloudModel.ts";
-import { combinePDFPages } from "../src/pdfVectorExport.ts";
+import { composeSideBySidePDF } from "../src/pdfVectorExport.ts";
 import { buildNativeBilingualHTML } from "../src/pdfNativeHtml.ts";
 import { configureBilingualPDFPrintSettings } from "../src/pdfExportUtils.ts";
 
@@ -45,11 +45,11 @@ test("Mistral and LlamaParse use distinct page conventions and never fetch image
   ]));
   assert.throws(() => normalizeMarkdownPages(base(), "llamaparse", [{page_number: 0, markdown: "invalid"}]));
 });
-test("transcript-only mode does not require any JPEG and flows vertically", () => {
+test("native stacked transcript flows vertically with no appended originals", () => {
   const doc = base();
   const html = buildNativeBilingualHTML(doc.pages.map(page => ({
-    pageIndex: page.index, image: "", blocks: page.blocks.map(block => ({block, translation: "中文"})),
-  })), "Bilingual", "mineru", true);
+    pageIndex: page.index, blocks: page.blocks.map(block => ({block, translation: "中文"})),
+  })), "Bilingual", "mineru");
   assert.doesNotMatch(html, /<img alt=/);
   assert.match(html, /data-parser="mineru"/);
   assert.match(html, /margin:16mm 17mm 20mm/);
@@ -66,7 +66,7 @@ test("A4 printing resets saved printer paper dimensions and vertical offsets", (
   assert.equal(settings.unwriteableMarginBottom, 0);
   assert.equal(settings.edgeBottom, 0);
 });
-test("real PDF bytes preserve original page dimensions, rotation, image resources and vector content", async () => {
+test("side-by-side output embeds original PDF page content and checks page pairing", async () => {
   const original = await PDFDocument.create();
   const page = original.addPage([612, 792]);
   page.setRotation(degrees(90));
@@ -79,17 +79,18 @@ test("real PDF bytes preserve original page dimensions, rotation, image resource
   const translation = await PDFDocument.create();
   translation.addPage([595, 842]);
   const source = await original.save(), transcript = await translation.save();
-  const combined = await PDFDocument.load(await combinePDFPages(source, transcript, true, 2));
-  assert.equal(combined.getPageCount(), 3);
-  const preserved = combined.getPage(0);
-  assert.deepEqual(preserved.getSize(), {width: 612, height: 792});
-  assert.equal(preserved.getRotation().angle, 90);
-  assert.ok(preserved.node.Resources().lookupMaybe(
-    // PDFName imported dynamically below to keep all assertions on real PDF objects.
-    (await import("pdf-lib")).PDFName.of("XObject"),
-    (await import("pdf-lib")).PDFDict,
-  ));
-  const reversed = await PDFDocument.load(await combinePDFPages(source, transcript, false));
-  assert.deepEqual(reversed.getPage(1).getSize(), {width: 612, height: 792});
-  await assert.rejects(() => combinePDFPages(source, transcript, true, 3), /页数/);
+  async function* pages() {
+    yield { pageIndex: 0, bytes: transcript };
+    yield { pageIndex: 1, bytes: transcript };
+  }
+  const paired = await PDFDocument.load(await composeSideBySidePDF(source, pages(), 2));
+  assert.equal(paired.getPageCount(), 2);
+  assert.ok(paired.getPage(0).getWidth() > 1200);
+  const { PDFDict, PDFName, PDFRawStream } = await import("pdf-lib");
+  const forms = paired.getPage(0).node.Resources().lookup(PDFName.of("XObject"), PDFDict);
+  const originalForm = forms.lookup(forms.keys()[0], PDFRawStream);
+  const resources = originalForm.dict.lookup(PDFName.of("Resources"), PDFDict);
+  const images = resources.lookup(PDFName.of("XObject"), PDFDict);
+  assert.equal(images.lookup(images.keys()[0], PDFRawStream).dict.get(PDFName.of("Subtype")).toString(), "/Image");
+  await assert.rejects(() => composeSideBySidePDF(source, pages(), 3), /页数/);
 });
