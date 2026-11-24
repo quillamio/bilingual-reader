@@ -1,4 +1,4 @@
-import type { NativeBlock } from "./pdfNativeModel";
+import type { NativeBlock, NativeParser } from "./pdfNativeModel";
 
 export interface NativeExportPage {
   pageIndex: number;
@@ -17,10 +17,11 @@ function escapeHTML(value: string): string {
 export function buildNativeBilingualHTML(
   pages: NativeExportPage[],
   title: string,
-  parser: "pdfjs" | "docling",
+  parser: NativeParser,
+  transcriptOnly = false,
 ): string {
   const pageMarkup = pages.map(({ pageIndex, image, blocks }) => {
-    if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/u.test(image)) {
+    if (!transcriptOnly && !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/u.test(image)) {
       throw new Error("原始页面图像缺失或无效，不能生成不完整的 PDF。");
     }
     const paragraphs = blocks.map(({ block, translation }) => {
@@ -29,17 +30,18 @@ export function buildNativeBilingualHTML(
         escapeHTML(block.text) + '</' + enTag + '><p class="zh">' +
         escapeHTML(translation || "〔此段未翻译〕") + '</p></div>';
     }).join("\n");
-    return '<section class="original-page" data-page="' + (pageIndex + 1) + '">' +
+    const original = transcriptOnly ? "" :
+      '<section class="original-page" data-page="' + (pageIndex + 1) + '">' +
       '<div class="page-label">Original PDF · page ' + (pageIndex + 1) + '</div>' +
-      '<img alt="Original PDF page ' + (pageIndex + 1) + '" src="' + image + '">' +
-      '</section><section class="translation-page" data-page="' + (pageIndex + 1) + '">' +
+      '<img alt="Original PDF page ' + (pageIndex + 1) + '" src="' + image + '">' + '</section>';
+    return original + '<section class="translation-page" data-page="' + (pageIndex + 1) + '">' +
       '<div class="page-label">中英对照 · 原始页 ' + (pageIndex + 1) + '</div>' +
       (paragraphs || '<p class="empty">本页无可提取的正文；如为扫描版 PDF，需要 OCR。</p>') +
       '</section>';
   }).join("\n");
   const css = [
-    "@page{size:A4;margin:9mm 11mm}",
-    "html,body{background:#fff;color:#151515;margin:0;padding:0}",
+    "@page{size:A4;margin:16mm 17mm 20mm}",
+    "html,body{background:#fff;color:#151515;margin:0;padding:0;height:auto;min-height:0;max-height:none;overflow:visible}",
     'body{font:10.5pt/1.48 Arial,"PingFang SC","Microsoft YaHei",sans-serif}',
     ".page-label{font:8pt Arial,sans-serif;color:#777;margin-bottom:2mm}",
     ".original-page{break-after:page;page-break-after:always;text-align:center}",
