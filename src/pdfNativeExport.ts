@@ -1,7 +1,7 @@
 /**
  * PDF.js bilingual export. Requires only Zotero's ordinary PDF view, never
  * Zotero SDT reading mode or #sdt-content. All source-page visual elements
- * are retained through full-page JPEG snapshots.
+ * are retained by copying actual source PDF pages.
  */
 import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getRequestGapMs,
   getSkipLastPages, getMaxConsecutiveErrors } from "./settings";
@@ -34,7 +34,8 @@ function notify(reader: any, message: string): void {
 }
 function confirm(reader: any, message: string): boolean {
   const win = dialog(reader);
-  return typeof win?.confirm === "function" ? Boolean(win.confirm(message)) : true;
+  const promptWindow = typeof win?.confirm === "function" ? win : Zotero.getMainWindow() as any;
+  return typeof promptWindow?.confirm === "function" && Boolean(promptWindow.confirm(message));
 }
 function progress(button: HTMLButtonElement | null, text: string): void {
   if (!button) return;
@@ -123,7 +124,7 @@ export async function translateNativeDocument(
   return translated;
 }
 
-/** Export original PDF page + bilingual searchable text page per source page. */
+/** Export original PDF pages, then bilingual searchable transcript by source page. */
 export async function exportNativePDFBilingual(
   reader: any, button: HTMLButtonElement | null = null,
 ): Promise<void> {
@@ -140,7 +141,7 @@ export async function exportNativePDFBilingual(
     if (!attachment) throw new Error("找不到当前 PDF 附件。");
 
     if (!confirm(reader, "将直接解析原始 PDF 的 " + handle.pdf.numPages +
-      " 页，保留每页所有 Figure/表格/公式的完整画面并附加可搜索的英中译文页。\n" +
+      " 页，完整复制原始 PDF 页面并附加可搜索的英中译文页。\n" +
       "翻译文字将发送至当前选择的翻译后端（不发送页面图像）。\n" +
       "原始 PDF 页面将完整复制在文件前部，后附按原页码组织的双语译文。\n\n继续？")) return;
 
