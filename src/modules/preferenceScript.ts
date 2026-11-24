@@ -35,6 +35,10 @@ import {
   getNativePDFBackend, setNativePDFBackend, getDoclingEndpoint, setDoclingEndpoint,
   checkDoclingConnection,
 } from "../pdfNativeDocling";
+import { isCloudParser } from "../pdfCloudModel";
+import { getCloudKey, getCloudModel, setCloudKey, setCloudModel } from "../pdfCloudParsers";
+import { getExportOriginalAppendix, setExportOriginalAppendix } from "../pdfExportUtils";
+const CLOUD_PROVIDERS = ["mineru", "mistral", "llamaparse"] as const;
 
 const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
 
@@ -79,7 +83,15 @@ function saveSettings(doc: Document): void {
     )?.value || getDoclingEndpoint();
     // Reject an invalid/non-local URL before changing any other setting.
     setDoclingEndpoint(doclingURL);
-    setNativePDFBackend(nativeValue === "docling" ? "docling" : "pdfjs");
+    setNativePDFBackend(nativeValue === "docling" || isCloudParser(nativeValue) ? nativeValue : "pdfjs");
+    for (const provider of CLOUD_PROVIDERS) {
+      const key = getElement<HTMLInputElement>(doc, "bilingualreader-cloud-" + provider + "-key");
+      const model = getElement<HTMLInputElement>(doc, "bilingualreader-cloud-" + provider + "-model");
+      if (key) setCloudKey(provider, key.value);
+      if (model) setCloudModel(provider, model.value);
+    }
+    const appendix = getElement<HTMLInputElement>(doc, "bilingualreader-export-original-appendix");
+    if (appendix) setExportOriginalAppendix(appendix.checked);
   } catch (error: any) {
     setStatus(doc, "PDF 解析引擎配置错误：" + String(error?.message || error));
     return;
@@ -244,6 +256,22 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const native = getElement<HTMLSelectElement>(doc, "bilingualreader-native-backend");
   const doclingURL = getElement<HTMLInputElement>(doc, "bilingualreader-docling-url");
   if (native) native.value = getNativePDFBackend();
+  const refreshCloudFields = () => {
+    for (const provider of CLOUD_PROVIDERS) {
+      const section = getElement<HTMLElement>(doc, "bilingualreader-cloud-" + provider + "-section");
+      if (section) section.hidden = native?.value !== provider;
+    }
+  };
+  for (const provider of CLOUD_PROVIDERS) {
+    const key = getElement<HTMLInputElement>(doc, "bilingualreader-cloud-" + provider + "-key");
+    const model = getElement<HTMLInputElement>(doc, "bilingualreader-cloud-" + provider + "-model");
+    if (key) key.value = getCloudKey(provider);
+    if (model) model.value = getCloudModel(provider);
+  }
+  const appendix = getElement<HTMLInputElement>(doc, "bilingualreader-export-original-appendix");
+  if (appendix) appendix.checked = getExportOriginalAppendix();
+  refreshCloudFields();
+  native?.addEventListener("change", refreshCloudFields);
   if (doclingURL) doclingURL.value = getDoclingEndpoint();
   if (engine) engine.value = getEngine();
   if (url) url.value = getOllamaURL();
