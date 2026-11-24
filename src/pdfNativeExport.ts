@@ -11,8 +11,10 @@ import { buildBatchPayload, packBatchItems, parseBatchResult, splitTextForReques
 import { translateText } from "./bilingualReader";
 import { printHTMLToPDF, importExportedPDF } from "./readerUI";
 import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "./pdfNativeDocling";
-import { getNormalPDFProxy, parseNormalPDFWithPDFJS, snapshotPDFPage,
-  getOriginalPDFBytes } from "./pdfNativeRuntime";
+import { getNormalPDFProxy, parseNormalPDFWithPDFJS } from "./pdfNativeRuntime";
+import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
+import { parseWithCloudProvider } from "./pdfCloudParsers";
+import { appendOriginalPDF, readOriginalAttachment } from "./pdfVectorExport";
 import { type NativeDocument, type NativeBlock } from "./pdfNativeModel";
 import { buildNativeBilingualHTML, type NativeExportPage } from "./pdfNativeHtml";
 
@@ -140,20 +142,25 @@ export async function exportNativePDFBilingual(
     if (!confirm(reader, "将直接解析原始 PDF 的 " + handle.pdf.numPages +
       " 页，保留每页所有 Figure/表格/公式的完整画面并附加可搜索的英中译文页。\n" +
       "翻译文字将发送至当前选择的翻译后端（不发送页面图像）。\n" +
-      "预览版原始页会栅格化为 JPEG，暂不保留矢量可编辑性。\n\n继续？")) return;
+      "原始 PDF 页面将完整复制在文件前部，后附按原页码组织的双语译文。\n\n继续？")) return;
 
     progress(button, "正在提取 PDF.js 文本...");
     const fallback = await parseNormalPDFWithPDFJS(handle.pdf,
       ({ page, pages }) => progress(button, "解析 PDF：" + page + "/" + pages));
     let parsed = fallback;
-    if (getNativePDFBackend() === "docling") {
+    const provider = getNativePDFBackend();
+    if (provider !== "pdfjs") {
+      if (isCloudParser(provider) && !confirm(reader,
+        "即将把完整原始 PDF 上传到 " + CLOUD_NAMES[provider] +
+        "，可能产生费用并受服务商数据处理政策约束。敏感/未发表文献建议使用本地解析。\n\n同意上传？")) return;
       try {
-        progress(button, "本地 Docling 正在解析页面结构...");
-        parsed = await parseWithLocalDocling(await getOriginalPDFBytes(handle.pdf),
-          getDoclingEndpoint(), fallback);
+        progress(button, "正在解析：" + provider);
+        const bytes = await readOriginalAttachment(attachment);
+        parsed = provider === "docling"
+          ? await parseWithLocalDocling(bytes, getDoclingEndpoint(), fallback)
+          : await parseWithCloudProvider(provider, bytes, fallback);
       } catch (error) {
-        Zotero.logError(error as Error);
-        if (!confirm(reader, "Docling 无法解析此 PDF：" +
+        if (!confirm(reader, "所选解析服务失败：" +
           String((error as Error)?.message || error) +
           "\n是否回退到 PDF.js 内置解析？")) return;
       }
@@ -174,38 +181,32 @@ export async function exportNativePDFBilingual(
     if (missing && !confirm(reader, "有 " + missing +
       " 个段落未完成翻译。是否仅导出已完成内容和所有原始页面？")) return;
 
-    const doc = Zotero.getMainWindow().document;
-    const exportPages: NativeExportPage[] = [];
-    let encodedBytes = 0;
-    for (const page of parsed.pages) {
-      progress(button, "保留原始页面：" + (page.index + 1) + "/" + parsed.pages.length);
-      const image = await snapshotPDFPage(handle.pdf, page.index,
-        doc, handle.contentWindow, 1.25);
-      encodedBytes += image.length;
-      if (encodedBytes > 110 * 1024 * 1024) {
-        throw new Error("原始页面图像超过 110 MB；请将 PDF 拆分后分批导出。");
-      }
-      exportPages.push({
-        pageIndex: page.index, image,
-        blocks: page.blocks.filter(canTranslate).map((block) => ({
-          block, translation: translated.get(block.id) || "",
-        })),
-      });
-    }
+    const exportPages: NativeExportPage[] = parsed.pages.map(page => ({
+      pageIndex: page.index, image: "",
+      blocks: page.blocks.filter(canTranslate).map(block => ({
+        block, translation: translated.get(block.id) || "",
+      })),
+    }));
     const title = String(attachment.getField?.("title") || "文献") + " - PDF.js 双语";
-    const html = buildNativeBilingualHTML(exportPages, title, parsed.source);
+    const html = buildNativeBilingualHTML(exportPages, title, parsed.source, true);
     const temp = Zotero.getTempDirectory();
     temp.append("native-bilingual-" + Date.now() + "-" +
       Math.random().toString(36).slice(2, 9) + ".pdf");
+    const combined = Zotero.getTempDirectory();
+    combined.append("native-combined-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".pdf");
     try {
-      progress(button, "正在打印完整双语 PDF...");
+      progress(button, "正在打印双语译文...");
       await printHTMLToPDF(html, temp);
-      await importExportedPDF(temp, attachment, "PDF.js 原版双语");
+      progress(button, "正在复制原始 PDF 矢量页面并检查页数...");
+      await appendOriginalPDF(temp, attachment, combined, true, parsed.pages.length);
+      await importExportedPDF(combined, attachment, "原版保真中英对照");
     } finally {
-      try { if (temp.exists()) temp.remove(false); } catch (_) { /* Temp only */ }
+      for (const file of [temp, combined]) {
+        try { if (file.exists()) file.remove(false); } catch (_) { /* Temp only */ }
+      }
     }
-    notify(reader, "PDF.js 原生导出成功。原文页面和 Figure 均以完整页面图像保存，" +
-      "新增英中文本页可复制/搜索。解析方式：" + parsed.source +
+    notify(reader, "双语导出成功。原始 PDF 页面及图表已复制，" +
+      "后附按原页码排列的可复制/搜索双语文本。解析方式：" + parsed.source +
       (parsed.warnings.length ? "\n提示：" + parsed.warnings.slice(0, 3).join("；") : ""));
   } catch (error) {
     Zotero.logError(error as Error);
