@@ -3,8 +3,9 @@ import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
 import { buildExportHTML, printHTMLToPDF } from "../src/readerUI";
-import { readPDFFile } from "../src/pdfVectorExport";
-import { PDFDocument } from "pdf-lib";
+import { readPDFFile, composeSideBySidePDF, writePDFFile } from "../src/pdfVectorExport";
+import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
+import { buildNativeBilingualHTML } from "../src/pdfNativeHtml";
 import { freezePDFExportImages } from "../src/pdfExportAssets";
 import { clearTranslationCache } from "../src/translationCache";
 import {
@@ -188,6 +189,50 @@ describe("startup", function () {
     }
   });
 
+  it("exports real side-by-side PDF with continuation sheets", async function () {
+    this.timeout(120000);
+    const original = await PDFDocument.create();
+    const source = original.addPage([595.28, 841.89]);
+    const font = await original.embedFont(StandardFonts.Helvetica);
+    source.drawText("BRORIGINAL", { x: 60, y: 760, font, size: 18 });
+    source.drawRectangle({ x: 50, y: 100, width: 120, height: 100, color: rgb(0, 0, 1) });
+    const second = original.addPage([842, 595]);
+    second.setRotation(degrees(90));
+    second.drawText("BRROTATED", { x: 60, y: 400, font, size: 18 });
+    second.drawRectangle({ x: 100, y: 100, width: 100, height: 100, color: rgb(1, 0, 0) });
+    const temp = Zotero.getTempDirectory();
+    temp.append("br-side-by-side-" + Date.now() + ".pdf");
+    const output = Zotero.getTempDirectory();
+    output.append("br-side-final-" + Date.now() + ".pdf");
+    async function* transcripts() {
+      for (let pageIndex = 0; pageIndex < 2; pageIndex++) {
+        const blocks = Array.from({length: pageIndex === 0 ? 96 : 1}, (_, i) => ({
+          block: { id: "t" + i, pageIndex, order: i, type: "paragraph" as const,
+            source: "pdfjs" as const, bbox: {left: 0, right: 1, top: 1, bottom: 0}, text: "English" },
+          translation: "BRRIGHT" + pageIndex + String(i).padStart(3, "0") + " 中文译文必须完整显示。",
+        }));
+        try {
+          await printHTMLToPDF(buildNativeBilingualHTML([{pageIndex, image: "", blocks}],
+            "Side-by-side fixture", "pdfjs", true, true), temp);
+          yield {pageIndex, bytes: await readPDFFile(temp)};
+        } finally { if (temp.exists()) temp.remove(false); }
+      }
+    }
+    try {
+      const bytes = await composeSideBySidePDF(await original.save(), transcripts(), 2);
+      const paired = await PDFDocument.load(bytes);
+      assert.isAbove(paired.getPageCount(), 2);
+      assert.isAbove(paired.getPage(0).getWidth(), 1190);
+      await writePDFFile(output, bytes);
+      const c = (globalThis as any).Components;
+      const env = c.classes["@mozilla.org/process/environment;1"].getService(c.interfaces.nsIEnvironment);
+      const dir = env.get("BR_PDF_REGRESSION_DIR");
+      if (dir) output.copyTo((Zotero.File as any).pathToFile(dir), "side-by-side.pdf");
+    } finally {
+      for (const file of [temp, output]) if (file.exists()) file.remove(false);
+    }
+  });
+
   it("should preserve existing data-url images in PDF export clones", async function () {
     const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("image-export-test");
     const root = doc.createElement("div");
@@ -289,6 +334,7 @@ describe("startup", function () {
     assert.equal(doc.querySelectorAll(".bilingual-reader-export-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-native-pdf-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-native-reading-button").length, 1);
+    assert.equal(doc.querySelectorAll(".bilingual-reader-side-by-side-button").length, 1);
     assert.equal(doc.querySelector(".bilingual-reader-toolbar-button")?.textContent, "🀄");
     assert.equal(doc.querySelector(".bilingual-reader-export-button")?.textContent, "🖨️");
     assert.notExists(doc.querySelector(".bilingual-reader-settings-button"));
