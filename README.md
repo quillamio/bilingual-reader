@@ -15,7 +15,7 @@
 - 🀄 一键开启 / 关闭 Zotero 原有阅读模式的段落中英对照。
 - 📖 **PDF.js 原生双语阅读面板**：普通 PDF 页面视图下直接提取文本翻译，保留原始页面图片，不依赖 Zotero SDT 阅读模式。
 - 📑 **PDF.js 原版保真双语导出**：直接复制原始 PDF 页面（保留原图、矢量和文字层），后附可搜索的英中对照页；支持 PDF.js、Docling、MinerU、Mistral OCR 和 LlamaParse 五种解析器。
-- 默认调用 **Translate for Zotero** 的翻译服务（推荐使用google，其次必应）。
+- 默认内置 **Google 翻译（免 API Key）**；独立段落翻译引擎，另有 Ollama 与 Translate for Zotero 兼容模式。
 - 可选 **Ollama** 本地或云端模型。
 - 自动缓存已完成译文。
 - 支持短段落合并、受控并发、请求节流、超时与连续失败暂停。
@@ -27,7 +27,7 @@
 
 - Zotero 10.x
 - macOS 为主要测试平台
-- 使用 Translate for Zotero 时，需要先安装并配置：
+- 默认 Google 无需额外安装插件；仅选择 Translate for Zotero 兼容模式时需要先安装：
   https://github.com/windingwind/zotero-pdf-translate
 
 ## 安装
@@ -51,8 +51,8 @@
 
 可以配置：
 
-- Translate for Zotero / Ollama；
-- Translate for Zotero 固定跟随其当前默认服务；
+- 内置统一翻译引擎管理：各服务独立密钥、模型、端点、领域及测试；
+- 兼容 Translate for Zotero / Ollama；
 - 不翻译末尾页数；
 - 最大并发请求；
 - 请求启动间隔；
@@ -61,6 +61,14 @@
 - 请求超时；
 - 连续失败后暂停；
 - 翻译缓存清理。
+
+## 内置翻译引擎设置
+
+在 Zotero 设置 → 中英对照 → 翻译后端，选择所需服务。免费服务可直接使用；需要 API Key 的服务必须填写各自的有效凭据。模型和端点等参数互相隔离，同一时间只使用所选服务。
+
+**医学论文翻译建议**：优先测试 Google 以获得无需密钥的基本体验；专业医学术语可选择有道智云的“medicine”领域，或按需使用 Qwen-MT、Gemini、Claude 等服务，但应在论文关键结论、剂量、统计学方向等处人工核对。任何在线翻译都会将待翻译段落传输到外部服务，处理未发表或敏感资料时建议优先使用本地 Ollama / LibreTranslate / NLLB。
+
+“测试此服务”会向该服务发送短句，可能产生 API 费用，不会自动测试所有服务。免费网页接口、签名 API、第三方兼容端点可能随时间改变，不保证运行时持续可用。
 
 ## PDF 解析与导出（预览版）
 
@@ -81,6 +89,17 @@ Zotero 设置 → 中英对照 → 原始 PDF 解析，选择解析引擎。PDF.
 **🖨️ 旧版逐段重排导出**：清理读者视口的固定高度、裁切与位置样式，统一 A4 边距，等待 HTML 完全加载才打印。默认附加完整原始 PDF 作为附录；如果检测到漏图，继续导出时必须保留原始 PDF 附录。附录并非将缺失 Figure 插入其正文中的正确位置。若希望减小文件，可在设置中关闭默认附录（检测到疑似漏图时仍会提示附录）。
 
 PDF 合并后重新读取校验总页数，导入 Zotero 为新附件；不覆盖原文件。CI 包含真实打印样本的独立渲染检查。
+
+## 内置翻译服务的注意事项
+
+- Google 与 Bing 免密钥方案通过非官方网页翻译端点联网请求，**不是官方的有服务等级保证的 API**；可能受服务规则、网络地区、速率限制或端点调整影响。不能保证无限量或永久可用。
+- 为降低限流及避免跨段错位，内置服务固定逐段串行，Google 最短请求间隔 750 毫秒，Bing 最短间隔 300 毫秒。可在设置中继续调大请求间隔。
+- 文献正文会发送给所选择的在线翻译服务。敏感、未发表或受限制的数据请使用本地 Ollama 并自行核对隐私要求。
+- 已经选择 Translate for Zotero / Ollama 的旧用户设置会保留；新安装默认 Google。
+- 内置段落引擎覆盖免费、商业 API、自托管三类。各厂商的账户、付费额度、官方 API 授权及实际可用性仍由厂商决定。
+- 部分词典（Cambridge、Collins、Bing Dict 等）只接受单词，不适合论文全文段落翻译，故不提供段落模式。Pot 只显示外部弹窗而不会返回译文。CNKI 和 Iciba 网页加密适配已集成，但服务可能触发人工验证或改变反爬参数，因此需要单独进行真实可用性测试。
+- API Key 分服务保存在本地 Zotero 偏好配置中，不是 macOS 钥匙串加密存储；不要共享配置文件。更换密钥或模型会自动变更缓存命名空间。
+- 语言方向当前固定为英文到简体中文；部分厂商对中英文语言代码的定义不同，适配层分别转换。
 
 ## 当前限制
 
@@ -112,4 +131,15 @@ npm run test
 
 ## 许可证
 
-AGPL-3.0-or-later
+AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
+[windingwind/zotero-pdf-translate](https://github.com/windingwind/zotero-pdf-translate)
+的 `src/modules/services/`（AGPL-3.0）。相关实现文件顶部保留来源与许可声明。
+
+## 致谢 / Acknowledgments
+
+- [Bob](https://github.com/ripperhe/Bob)：参考产品的多服务选择与 OCR 交互；Bob 并非开源软件，本项目未复用其代码。
+- [Easydict](https://github.com/tisfeng/Easydict)（GPL-3.0）：参考多服务独立配置及开箱即用的体验；本次未复制代码。
+- [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate)（AGPL-3.0）：此前内置引擎分支包含参考及改编的服务适配器，保留相应源码署名和许可证。
+- [ReadIN 译读](https://github.com/phoenix8701-ctrl/readin-yidu)（AGPL-3.0）：参考整页双语阅读及回存 Zotero 的交互；本次未复制代码。
+- [Zotero PDF2zh](https://github.com/guaguastandup/zotero-pdf2zh)（AGPL-3.0）：参考 PDF 左右对照和附件导出设计；本次未复制其代码或调用其服务。
+- [pdf-lib](https://github.com/Hopding/pdf-lib)（MIT）：实际打包依赖，用于原页复制与合并；相关第三方许可证见 addon/content/licenses/pdf-export-dependencies.txt。
