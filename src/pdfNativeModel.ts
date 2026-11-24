@@ -5,6 +5,7 @@
  * heuristically recovered reading order without affecting the source pages.
  * This module does not access Zotero's SDT structure or #sdt-content.
  */
+export type NativeParser = "pdfjs" | "docling" | "mineru" | "mistral" | "llamaparse";
 export type NativeBlockType =
   | "heading" | "paragraph" | "caption" | "table"
   | "picture" | "formula" | "footnote";
@@ -22,7 +23,7 @@ export interface NativeBlock {
   type: NativeBlockType;
   text: string;
   bbox: NativeRect;
-  source: "pdfjs" | "docling";
+  source: NativeParser;
 }
 export interface NativePage {
   index: number;
@@ -31,7 +32,7 @@ export interface NativePage {
   blocks: NativeBlock[];
 }
 export interface NativeDocument {
-  source: "pdfjs" | "docling";
+  source: NativeParser;
   pages: NativePage[];
   warnings: string[];
 }
