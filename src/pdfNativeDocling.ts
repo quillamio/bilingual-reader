@@ -4,15 +4,16 @@
  * The sidecar enriches reading order and block types; original page images
  * always come from PDF.js, never from a Docling HTML/Markdown export.
  */
-import { validateNativeDocument, type NativeDocument } from "./pdfNativeModel";
+import { validateNativeDocument, type NativeDocument, type NativeParser } from "./pdfNativeModel";
+import { isCloudParser } from "./pdfCloudModel";
 
 const ROOT = "extensions.zotero.bilingualreader";
 const DEFAULT_URL = "http://127.0.0.1:8786";
-export function getNativePDFBackend(): "pdfjs" | "docling" {
+export function getNativePDFBackend(): NativeParser {
   const selected = (Zotero.Prefs as any).get(ROOT + ".native.backend", true);
-  return selected === "docling" ? "docling" : "pdfjs";
+  return selected === "docling" || isCloudParser(selected) ? selected : "pdfjs";
 }
-export function setNativePDFBackend(value: "pdfjs" | "docling"): void {
+export function setNativePDFBackend(value: NativeParser): void {
   (Zotero.Prefs as any).set(ROOT + ".native.backend", value, true);
 }
 export function getDoclingEndpoint(): string {
