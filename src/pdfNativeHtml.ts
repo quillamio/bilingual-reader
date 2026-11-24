@@ -10,9 +10,8 @@ function escapeHTML(value: string): string {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 /**
- * Printable bilingual edition: every original PDF page is rendered in full.
- * No SDT text/image nodes are consulted. Original vector shapes are rasterized
- * into JPEG for this preview, while the following text pages stay searchable.
+ * Printable transcript-only edition for vector PDF assembly; legacy snapshot
+ * mode remains available for tests and compatibility. No SDT nodes are used.
  */
 export function buildNativeBilingualHTML(
   pages: NativeExportPage[],
@@ -45,8 +44,9 @@ export function buildNativeBilingualHTML(
     'body{font:10.5pt/1.48 Arial,"PingFang SC","Microsoft YaHei",sans-serif}',
     ".page-label{font:8pt Arial,sans-serif;color:#777;margin-bottom:2mm}",
     ".original-page{break-after:page;page-break-after:always;text-align:center}",
-    ".original-page img{display:block;margin:0 auto;max-width:100%;max-height:270mm;height:auto;width:auto;object-fit:contain}",
-    ".translation-page{break-after:page;page-break-after:always}",
+    ".original-page img{display:block;margin:0 auto;max-width:100%;max-height:230mm;height:auto;width:auto;object-fit:contain}",
+    ".translation-page{break-after:page;page-break-after:always;height:auto;overflow:visible}",
+    ".translation-page:last-child{break-after:auto;page-break-after:auto}",
     ".unit{break-inside:auto;page-break-inside:auto;margin:0 0 3mm}",
     "h3.en{font-size:11pt;margin:0;break-after:avoid-page}",
     "p.en{margin:0 0 1mm;overflow-wrap:anywhere}",
@@ -55,6 +55,6 @@ export function buildNativeBilingualHTML(
     ".empty{color:#777}",
   ].join("\n");
   return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">" +
-    "<title>" + escapeHTML(title) + "</title><style>" + css +
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\"><title>" + escapeHTML(title) + "</title><style>" + css +
     "</style></head><body data-parser=\"" + parser + "\">" + pageMarkup + "</body></html>";
 }
