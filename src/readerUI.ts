@@ -1,5 +1,6 @@
-import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName, getExportOriginalAppendix } from "./pdfExportUtils";
 import { freezePDFExportImages } from "./pdfExportAssets";
+import { appendOriginalPDF } from "./pdfVectorExport";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -113,25 +114,28 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
   for (const block of unfinishedBlocks) block.remove();
 
   const removable = Array.from(
-    root.querySelectorAll("script, button, input, textarea, select"),
+    root.querySelectorAll("script, style, link, iframe, object, embed, button, input, textarea, select"),
   ) as HTMLElement[];
   for (const element of removable) element.remove();
 
-  const baseURI = doc.baseURI || "about:blank";
+  for (const node of [root, ...Array.from(root.querySelectorAll("*"))] as Element[]) {
+    for (const attr of Array.from(node.attributes)) {
+      if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
+    }
+  }
   const safeTitle = escapeHTML(title || "中英对照翻译");
-  const safeBaseURI = escapeHTML(baseURI);
 
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<base href="${safeBaseURI}">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
 <title>${safeTitle}</title>
 <style>
   @page {
     size: A4;
-    margin: 16mm 17mm 17mm;
+    margin: 16mm 17mm 20mm;
   }
   html, body {
     background: #fff;
@@ -141,6 +145,10 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
   }
   body {
     overflow-wrap: anywhere;
@@ -160,6 +168,11 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
     box-sizing: border-box !important;
     margin: 0 !important;
     padding: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    contain: none !important;
+    content-visibility: visible !important;
   }
   #sdt-content :is(
     p, h1, h2, h3, h4, h5, h6, div, section, article,
@@ -178,8 +191,16 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
     margin-left: 0 !important;
     margin-right: 0 !important;
     overflow-wrap: anywhere !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    contain: none !important;
+    content-visibility: visible !important;
+    clip: auto !important;
+    clip-path: none !important;
   }
-  #sdt-content :is(p, li, blockquote, aside, figcaption):not(figure *) {
+  #sdt-content :is(p, li, blockquote, aside, figcaption) {
     text-indent: 0 !important;
     white-space: normal !important;
   }
@@ -211,7 +232,8 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
     height: auto !important;
     object-fit: contain;
   }
-  figure img { max-height: 230mm !important; }
+  figure { margin: 8pt 0; max-width: 100%; overflow: visible; }
+  figure img, figure svg, figure canvas { max-height: 225mm !important; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -350,17 +372,27 @@ export async function printHTMLToPDF(html: string, tempFile: any): Promise<void>
 
   const HiddenBrowser = getHiddenBrowserConstructor();
   const browser = new HiddenBrowser({ useHiddenFrame: false });
+  const htmlFile = Zotero.getTempDirectory();
+  htmlFile.append("br-print-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".html");
 
   try {
-    const loaded = await browser.load(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    // A local temporary file avoids huge encoded data URLs and logging PDF
+    // contents in the browser's load diagnostic.
+    await (Zotero.File as any).putContentsAsync(htmlFile.path, html);
+    const loaded = await browser.load(htmlFile.path);
     if (!loaded) throw new Error("用于导出的中英对照页面加载失败。");
 
+    // 'interactive' is too early: lazy images may still be loading.
+    // Never silently print if the ready-state actor failed.
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await browser.waitForDocument({ allowInteractiveAfter: 1500 });
-    } catch (_) {
-      // The data document is usually ready after load(); continue to print if
-      // the readiness actor is unavailable in an older Zotero 10 build.
-    }
+      await Promise.race([
+        browser.waitForDocument({ allowInteractiveAfter: false }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("打印页面资源加载超时，已取消导出。")), 60000);
+        }),
+      ]);
+    } finally { if (timer !== undefined) clearTimeout(timer); }
 
     const browsingContext = browser.browsingContext;
     if (!browsingContext?.print) {
@@ -396,6 +428,7 @@ export async function printHTMLToPDF(html: string, tempFile: any): Promise<void>
     } catch (_) {
       // Best-effort cleanup only.
     }
+    try { if (htmlFile.exists()) htmlFile.remove(false); } catch (_) { /* Temp only */ }
   }
 }
 
@@ -453,7 +486,10 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
     // A timestamped file should normally not exist.
   }
 
+  const combinedFile = Zotero.getTempDirectory();
+  combinedFile.append("br-combined-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".pdf");
   let importedAttachment: any = null;
+  let preserveOriginal = getExportOriginalAppendix();
   try {
     const liveRoot = doc.querySelector("#sdt-content") as HTMLElement;
     const exportClone = liveRoot.cloneNode(true) as HTMLElement;
@@ -466,13 +502,17 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
       }
       if (!confirmMessage(reader,
         `检测到可能缺失的图片：${parts.join("；")}。\n\n` +
-        "这通常是 Zotero 阅读模式未加载相应图像。继续导出可能缺图，建议检查原始 PDF。是否继续？")) {
+        "将保留完整原始 PDF 页面作为附录，确保原图可查阅；重排正文中可能仍缺图。是否继续？")) {
         return;
       }
+      preserveOriginal = true;
     }
     const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
     await printHTMLToPDF(html, tempFile);
-    importedAttachment = await importExportedPDF(tempFile, sourceAttachment);
+    if (preserveOriginal) {
+      await appendOriginalPDF(tempFile, sourceAttachment, combinedFile, false);
+    }
+    importedAttachment = await importExportedPDF(preserveOriginal ? combinedFile : tempFile, sourceAttachment);
   } catch (error: any) {
     Zotero.logError(error as Error);
     showMessage(reader, `导出中英对照 PDF 失败：${error?.message || String(error)}`);
@@ -480,13 +520,15 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   } finally {
     try {
       if (tempFile.exists()) tempFile.remove(false);
+      if (combinedFile.exists()) combinedFile.remove(false);
     } catch (_) {
       // The imported Zotero attachment has already copied the file.
     }
   }
 
   if (importedAttachment) {
-    showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。");
+    showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。" +
+      (preserveOriginal ? "\n已附加完整原始 PDF 页面，原始图表可在附录查阅。" : ""));
   }
 }
 
