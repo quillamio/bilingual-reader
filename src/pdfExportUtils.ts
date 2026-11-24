@@ -47,7 +47,7 @@ export function normalizeExportContent(root: HTMLElement): void {
     "#sdt-content",
     "p", "h1", "h2", "h3", "h4", "h5", "h6",
     "div", "section", "article", "li", "ul", "ol",
-    "blockquote", "aside", "figcaption",
+    "blockquote", "aside", "figcaption", "table", "thead", "tbody", "tfoot", "tr", "td", "th", "pre",
   ].join(",");
 
   const blocks: HTMLElement[] = [root];
@@ -69,6 +69,11 @@ export function normalizeExportContent(root: HTMLElement): void {
       "width", "min-width", "max-width",
       "margin-left", "margin-right",
       "overflow", "overflow-x", "overflow-y",
+      "height", "min-height", "max-height", "block-size", "min-block-size", "max-block-size",
+      "clip", "clip-path", "contain", "content-visibility", "mask",
+      "margin-top", "margin-bottom", "margin-block-start", "margin-block-end",
+      "page-break-before", "page-break-after", "page-break-inside",
+      "break-before", "break-after", "break-inside", "columns", "column-count", "column-width",
     ]) {
       style.removeProperty(prop);
     }
@@ -100,10 +105,30 @@ export function configureBilingualPDFPrintSettings(settings: any): void {
   settings.marginLeft = 0;
   settings.scaling = 1;
   settings.shrinkToFit = false;
+  // Fix physical paper dimensions, not merely the CSS viewport. Older Gecko
+  // settings objects may expose only a subset of these properties.
+  if ("paperSizeUnit" in settings) settings.paperSizeUnit = 1; // millimetres
+  if ("paperWidth" in settings) settings.paperWidth = 210;
+  if ("paperHeight" in settings) settings.paperHeight = 297;
+  if ("orientation" in settings) settings.orientation = 0; // portrait
+  for (const edge of ["Top", "Right", "Bottom", "Left"]) {
+    for (const prefix of ["unwriteableMargin", "edge"]) {
+      const property = prefix + edge;
+      if (property in settings) settings[property] = 0;
+    }
+  }
 
   // Newer Gecko builds expose these properties. Do not assign unsupported
   // properties on an XPCOM WrappedNative, which would throw in Zotero 10.
   if ("honorPageRuleMargins" in settings) settings.honorPageRuleMargins = true;
   if ("ignoreUnwriteableMargins" in settings) settings.ignoreUnwriteableMargins = true;
   if ("usePageRuleSizeAsPaperSize" in settings) settings.usePageRuleSizeAsPaperSize = true;
+}
+
+const APPENDIX_PREF = "extensions.zotero.bilingualreader.export.originalAppendix";
+export function getExportOriginalAppendix(): boolean {
+  return (Zotero.Prefs as any).get(APPENDIX_PREF, true) !== false;
+}
+export function setExportOriginalAppendix(value: boolean): void {
+  (Zotero.Prefs as any).set(APPENDIX_PREF, value, true);
 }
