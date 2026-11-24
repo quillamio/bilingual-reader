@@ -4,7 +4,7 @@
  * vector artwork. Document-level bookmarks, forms and signatures are not
  * guaranteed to survive a new combined PDF; the source attachment is untouched.
  */
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, degrees, rgb, type PDFPage } from "pdf-lib";
 
 export async function combinePDFPages(
   original: Uint8Array, bilingual: Uint8Array, originalFirst = true,
@@ -83,4 +83,71 @@ export async function appendOriginalPDF(
   const transcript = await readPDFFile(transcriptFile);
   const merged = await combinePDFPages(original, transcript, originalFirst, expectedPages);
   await writePDFFile(outputFile, merged);
+}
+
+
+/** Place a source page inside a panel without cropping or rasterizing it.
+ * PDF page rotation is clockwise; drawPage's rotation is counter-clockwise.
+ * Embed the visible CropBox, not the entire MediaBox.
+ */
+async function drawPanel(out: PDFDocument, target: PDFPage, source: PDFPage,
+  left: number, bottom: number, width: number, height: number): Promise<void> {
+  const box = source.getCropBox();
+  if (!source.node.Contents()) return; // a genuinely blank original page
+  if (!(box.width > 0 && box.height > 0)) throw new Error("无效 PDF 页面裁切框。");
+  const rotation = ((source.getRotation().angle % 360) + 360) % 360;
+  if (![0, 90, 180, 270].includes(rotation)) throw new Error("不支持的原页旋转角度。");
+  const quarter = rotation === 90 || rotation === 270;
+  const scale = Math.min(width / (quarter ? box.height : box.width),
+    height / (quarter ? box.width : box.height));
+  const w = box.width * scale, h = box.height * scale;
+  let x = left + (width - (quarter ? h : w)) / 2;
+  let y = bottom + (height - (quarter ? w : h)) / 2;
+  if (rotation === 90) y += w;
+  else if (rotation === 180) { x += w; y += h; }
+  else if (rotation === 270) x += h;
+  const embedded = await out.embedPage(source, {
+    left: box.x, bottom: box.y, right: box.x + box.width, top: box.y + box.height,
+  });
+  target.drawPage(embedded, { x, y, width: w, height: h, rotate: degrees(-rotation) });
+}
+
+/** Each source page is matched to all independently printed translation pages.
+ * Repeat the original on continuation sheets instead of shrinking or cutting
+ * a long translation. Both panels are PDF vector/form objects, not screenshots.
+ */
+export async function composeSideBySidePDF(
+  original: Uint8Array, transcripts: AsyncIterable<{ pageIndex: number; bytes: Uint8Array }>,
+  expectedPages?: number,
+): Promise<Uint8Array> {
+  const source = await PDFDocument.load(original, { updateMetadata: false });
+  const count = source.getPageCount();
+  if (!count || (expectedPages !== undefined && count !== expectedPages)) {
+    throw new Error("左右对照：原始页数不匹配。");
+  }
+  const out = await PDFDocument.create();
+  let index = 0, sheets = 0;
+  for await (const entry of transcripts) {
+    if (entry.pageIndex !== index || index >= count) throw new Error("左右对照：译文页顺序错误或缺页。");
+    const translated = await PDFDocument.load(entry.bytes, { updateMetadata: false });
+    if (!translated.getPageCount()) throw new Error("左右对照：译文页面为空。");
+    const originalPage = source.getPage(index);
+    for (const rightPage of translated.getPages()) {
+      const panelW = 595.28, panelH = 841.89, gutter = 16;
+      const sheet = out.addPage([panelW * 2 + gutter, panelH]);
+      sheet.drawLine({ start: { x: panelW + gutter / 2, y: 12 },
+        end: { x: panelW + gutter / 2, y: panelH - 12 },
+        thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
+      await drawPanel(out, sheet, originalPage, 0, 0, panelW, panelH);
+      await drawPanel(out, sheet, rightPage, panelW + gutter, 0, panelW, panelH);
+      sheets++;
+    }
+    index++;
+  }
+  if (index !== count || !sheets) throw new Error("左右对照：原始页面未全部配对。");
+  const bytes = await out.save();
+  if ((await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount() !== sheets) {
+    throw new Error("左右对照：最终 PDF 页数校验失败。");
+  }
+  return bytes;
 }
