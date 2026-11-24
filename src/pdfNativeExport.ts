@@ -14,7 +14,8 @@ import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "
 import { getNormalPDFProxy, parseNormalPDFWithPDFJS } from "./pdfNativeRuntime";
 import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
 import { parseWithCloudProvider } from "./pdfCloudParsers";
-import { appendOriginalPDF, readOriginalAttachment } from "./pdfVectorExport";
+import { appendOriginalPDF, readOriginalAttachment, composeSideBySidePDF, readPDFFile, writePDFFile } from "./pdfVectorExport";
+import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
 import { type NativeDocument, type NativeBlock } from "./pdfNativeModel";
 import { buildNativeBilingualHTML, type NativeExportPage } from "./pdfNativeHtml";
 
@@ -46,14 +47,15 @@ async function translateSegment(
   text: string, itemID: number, engine: ReturnType<typeof getEngine>,
 ): Promise<{ text: string; tag: string }> {
   const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
+  const gap = getServiceDefinition(engine)?.group === "free" ? Math.max(engine === "bing" ? 300 : 750, getRequestGapMs()) : getRequestGapMs();
   const translated: string[] = [];
-  let tag = getCacheEngineTag();
+  let tag = getCacheEngineTag(undefined, engine);
   for (const chunk of chunks) {
     const response = await translateText(chunk, itemID, engine);
     if (isFailure(response.text)) throw new Error("翻译服务返回无效内容。");
     translated.push(response.text);
     tag = response.engineTag;
-    if (getRequestGapMs()) await Zotero.Promise.delay(getRequestGapMs());
+    if (gap) await Zotero.Promise.delay(gap);
   }
   return { text: translated.join(" ").trim(), tag };
 }
@@ -66,7 +68,8 @@ export async function translateNativeDocument(
   isCancelled?: () => boolean,
 ): Promise<Map<string, string>> {
   const engine = getEngine();
-  const engineTag = getCacheEngineTag();
+  if (isManagedService(engine)) assertServiceConfigured(engine);
+  const engineTag = getCacheEngineTag(undefined, engine);
   const cutoff = document.pages.length - getSkipLastPages();
   const pending: Array<NativeBlock & BatchInput> = [];
   const translated = new Map<string, string>();
@@ -79,7 +82,7 @@ export async function translateNativeDocument(
       else pending.push({ ...block, id: block.id, text: block.text });
     }
   }
-  const jobs = packBatchItems(pending, getMaxCharsPerRequest(), 4);
+  const jobs = packBatchItems(pending, getMaxCharsPerRequest(), isManagedService(engine) ? 1 : 4);
   let done = 0;
   let consecutiveFailures = 0;
   for (const job of jobs) {
@@ -105,7 +108,7 @@ export async function translateNativeDocument(
       }
       for (const { block, result, tag } of responses) {
         translated.set(block.id, result);
-        saveCachedTranslation(itemKey, block.text, result, tag, isFailure);
+        saveCachedTranslation(itemKey, block.text, result, engine === "pdftranslate" ? tag : engineTag, isFailure);
       }
       consecutiveFailures = 0;
     } catch (error) {
@@ -126,7 +129,7 @@ export async function translateNativeDocument(
 
 /** Export original PDF pages, then bilingual searchable transcript by source page. */
 export async function exportNativePDFBilingual(
-  reader: any, button: HTMLButtonElement | null = null,
+  reader: any, button: HTMLButtonElement | null = null, sideBySide = false,
 ): Promise<void> {
   if (!reader || typeof reader !== "object" || active.has(reader)) return;
   active.add(reader);
@@ -143,7 +146,7 @@ export async function exportNativePDFBilingual(
     if (!confirm(reader, "将直接解析原始 PDF 的 " + handle.pdf.numPages +
       " 页，完整复制原始 PDF 页面并附加可搜索的英中译文页。\n" +
       "翻译文字将发送至当前选择的翻译后端（不发送页面图像）。\n" +
-      "原始 PDF 页面将完整复制在文件前部，后附按原页码组织的双语译文。\n\n继续？")) return;
+      (sideBySide ? "左侧原始 PDF，右侧中文译文；长译文自动续页。" : "原始 PDF 页面完整复制在前部，后附按页码组织的双语译文。") + "\n\n继续？")) return;
 
     progress(button, "正在提取 PDF.js 文本...");
     const fallback = await parseNormalPDFWithPDFJS(handle.pdf,
@@ -196,18 +199,34 @@ export async function exportNativePDFBilingual(
     const combined = Zotero.getTempDirectory();
     combined.append("native-combined-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".pdf");
     try {
-      progress(button, "正在打印双语译文...");
-      await printHTMLToPDF(html, temp);
-      progress(button, "正在复制原始 PDF 矢量页面并检查页数...");
-      await appendOriginalPDF(temp, attachment, combined, true, parsed.pages.length);
-      await importExportedPDF(combined, attachment, "原版保真中英对照");
+      if (sideBySide) {
+        const original = await readOriginalAttachment(attachment);
+        async function* transcripts() {
+          for (const page of exportPages) {
+            progress(button, "左右对照排版：" + (page.pageIndex + 1) + "/" + exportPages.length);
+            try {
+              if (temp.exists()) temp.remove(false);
+              await printHTMLToPDF(buildNativeBilingualHTML([page], title, parsed.source, true, true), temp);
+              yield { pageIndex: page.pageIndex, bytes: await readPDFFile(temp) };
+            } finally { if (temp.exists()) temp.remove(false); }
+          }
+        }
+        const paired = await composeSideBySidePDF(original, transcripts(), parsed.pages.length);
+        await writePDFFile(combined, paired);
+      } else {
+        progress(button, "正在打印双语译文...");
+        await printHTMLToPDF(html, temp);
+        progress(button, "正在复制原始 PDF 矢量页面并检查页数...");
+        await appendOriginalPDF(temp, attachment, combined, true, parsed.pages.length);
+      }
+      await importExportedPDF(combined, attachment, sideBySide ? "左右对照翻译" : "原版保真中英对照");
     } finally {
       for (const file of [temp, combined]) {
         try { if (file.exists()) file.remove(false); } catch (_) { /* Temp only */ }
       }
     }
-    notify(reader, "双语导出成功。原始 PDF 页面及图表已复制，" +
-      "后附按原页码排列的可复制/搜索双语文本。解析方式：" + parsed.source +
+    notify(reader, (sideBySide ? "左右对照导出成功。左侧原始页，右侧中文译文；长译文自动续页。" : "双语导出成功。原始 PDF 页面及图表已复制，后附双语文本。") +
+      "\n解析方式：" + parsed.source +
       (parsed.warnings.length ? "\n提示：" + parsed.warnings.slice(0, 3).join("；") : ""));
   } catch (error) {
     Zotero.logError(error as Error);
@@ -222,12 +241,14 @@ const CLASS_NAME = "bilingual-reader-native-pdf-button";
 export function renderNativePDFToolbarButton(event: any): void {
   const { reader, doc, append } = event || {};
   if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
-  if (doc.querySelector("." + CLASS_NAME)) return;
+  for (const sideBySide of [false, true]) {
+  const className = sideBySide ? "bilingual-reader-side-by-side-button" : CLASS_NAME;
+  if (doc.querySelector("." + className)) continue;
   const button = doc.createElement("button") as HTMLButtonElement;
   button.type = "button";
-  button.className = "toolbar-button " + CLASS_NAME;
-  button.textContent = "📑";
-  button.title = "PDF.js 原始 PDF 直接解析与双语导出（无需阅读模式）";
+  button.className = "toolbar-button " + className;
+  button.textContent = sideBySide ? "◫" : "📑";
+  button.title = sideBySide ? "PDF 左右对照翻译（原文｜译文）" : "PDF.js 原始 PDF 直接解析与双语导出（无需阅读模式）";
   button.setAttribute("aria-label", button.title);
   button.style.cssText = "min-width:34px;padding-inline:5px;font-size:18px;line-height:1";
   button.addEventListener("click", (event: Event) => {
@@ -235,13 +256,18 @@ export function renderNativePDFToolbarButton(event: any): void {
     event.stopPropagation();
     if (button.disabled) return;
     button.disabled = true;
-    void exportNativePDFBilingual(reader, button).finally(() => {
+    void exportNativePDFBilingual(reader, button, sideBySide).finally(() => {
       button.disabled = false;
     });
   });
   append(button);
+  }
 }
 export function cleanupNativePDFToolbarButton(reader: any): void {
-  try { reader?._iframeWindow?.document?.querySelector("." + CLASS_NAME)?.remove(); }
+  try {
+    for (const name of [CLASS_NAME, "bilingual-reader-side-by-side-button"]) {
+      reader?._iframeWindow?.document?.querySelector("." + name)?.remove();
+    }
+  }
   catch (_) { /* Viewer closed */ }
 }
