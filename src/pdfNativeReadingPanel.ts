@@ -4,8 +4,10 @@
  * viewer and shows extracted bilingual paragraphs beside it.
  * No SDT structure, reading-mode toggle, or #sdt-content required.
  */
-import { getNormalPDFProxy, parseNormalPDFWithPDFJS,
-  getOriginalPDFBytes } from "./pdfNativeRuntime";
+import { getNormalPDFProxy, parseNormalPDFWithPDFJS } from "./pdfNativeRuntime";
+import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
+import { parseWithCloudProvider } from "./pdfCloudParsers";
+import { readOriginalAttachment } from "./pdfVectorExport";
 import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "./pdfNativeDocling";
 import { translateNativeDocument } from "./pdfNativeExport";
 import { type NativeDocument } from "./pdfNativeModel";
@@ -124,19 +126,33 @@ export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
     });
     if (session.closed) return;
     let parsed = original;
-    if (getNativePDFBackend() === "docling") {
+    const provider = getNativePDFBackend();
+    const attachment = Zotero.Items.get(Number(reader.itemID || 0));
+    if (provider !== "pdfjs") {
+      if (isCloudParser(provider)) {
+        const win = Zotero.getMainWindow() as any;
+        if (!win?.confirm?.("即将上传完整原始 PDF 至 " + CLOUD_NAMES[provider] +
+          "，可能产生费用。请勿上传未经授权的敏感文献。\n\n同意上传？")) {
+          ui.status.textContent = "未授权云端解析，已停止。"; return;
+        }
+      }
       try {
-        ui.status.textContent = "本地 Docling 识别阅读顺序...";
-        parsed = await parseWithLocalDocling(await getOriginalPDFBytes(handle.pdf),
-          getDoclingEndpoint(), original);
+        ui.status.textContent = "正在解析：" + provider;
+        const bytes = await readOriginalAttachment(attachment);
+        parsed = provider === "docling" ?
+          await parseWithLocalDocling(bytes, getDoclingEndpoint(), original) :
+          await parseWithCloudProvider(provider, bytes, original, () => session.closed);
       } catch (error) {
-        Zotero.logError(error as Error);
-        ui.status.textContent = "Docling 不可用，已回退 PDF.js。";
+        if (session.closed) return;
+        const win = Zotero.getMainWindow() as any;
+        if (!win?.confirm?.("解析失败：" + String((error as Error)?.message || error) +
+          "\n是否回退 PDF.js？")) {
+          ui.status.textContent = "解析已停止。"; return;
+        }
       }
     }
     if (session.closed) return;
     const destination = paintParagraphs(doc, ui.body, parsed, handle.contentWindow);
-    const attachment = Zotero.Items.get(Number(reader.itemID || 0));
     ui.status.textContent = "正在翻译：" + parsed.pages.length + " 页";
     const result = await translateNativeDocument(
       parsed, Number(reader.itemID || 0), String(attachment?.key || reader.itemID || ""),
