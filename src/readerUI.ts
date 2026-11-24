@@ -119,7 +119,7 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
   for (const element of removable) element.remove();
 
   for (const node of [root, ...Array.from(root.querySelectorAll("*"))] as Element[]) {
-    for (const attr of Array.from(node.attributes)) {
+    for (const attr of Array.from(node.attributes) as Attr[]) {
       if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
     }
   }
@@ -458,7 +458,8 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   if (
     !confirmMessage(
       reader,
-      "将生成一个新的中英对照 PDF，并作为附件加入这篇文献的 Zotero 条目。\n\n继续导出？",
+      "将生成一个新的中英对照 PDF，并作为附件加入这篇文献的 Zotero 条目。" +
+      (getExportOriginalAppendix() ? "\n将附加完整原始 PDF 页面，避免科研图表漏失。" : "") + "\n\n继续导出？",
     )
   ) {
     return;
