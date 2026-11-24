@@ -46,3 +46,43 @@ if found != sorted(found):
 if min(figure_red, figure_blue) < 100:
     raise AssertionError(f"Embedded red-blue figure not visibly rendered: {figure_red}, {figure_blue}")
 print(f"PASS: {len(doc)} real printed pages; {len(found)} visible text markers; red={figure_red}, blue={figure_blue} pixels.")
+
+
+# Check paired output independently: physical left/right geometry, rotation,
+# continuation completeness, and actual visible text/figure pixels.
+paired_path = path.with_name("side-by-side.pdf")
+if not paired_path.is_file():
+    raise SystemExit(f"Missing paired Zotero print fixture: {paired_path}")
+paired = fitz.open(paired_path)
+wanted = {f"BRRIGHT0{i:03d}" for i in range(96)} | {"BRRIGHT1000"}
+seen = []
+left_original = left_rotated = blue = red = 0
+for page in paired:
+    if not 1200 < page.rect.width < 1210:
+        raise AssertionError(f"Not a wide paired sheet: {page.rect}")
+    midpoint = page.rect.width / 2
+    for word in page.get_text("words"):
+        marker = word[4]
+        rect = fitz.Rect(word[:4])
+        if marker.startswith("BRRIGHT"):
+            if not page.rect.contains(rect) or rect.x0 <= midpoint:
+                raise AssertionError(f"Right-panel text misplaced: {marker} {rect}")
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect, alpha=False)
+            if sum(max(pix.samples[j:j+3]) < 160 for j in range(0, len(pix.samples), pix.n)) < 8:
+                raise AssertionError(f"Blank/clipped right marker: {marker}")
+            seen.append(marker)
+        elif marker in ("BRORIGINAL", "BRROTATED"):
+            if not page.rect.contains(rect) or rect.x1 >= midpoint:
+                raise AssertionError(f"Original marker outside left panel: {marker} {rect}")
+            left_original += marker == "BRORIGINAL"
+            left_rotated += marker == "BRROTATED"
+    pix = page.get_pixmap(clip=fitz.Rect(0, 0, midpoint, page.rect.height), alpha=False)
+    for j in range(0, len(pix.samples), pix.n):
+        r, g, b = pix.samples[j:j+3]
+        blue += b > 160 and r < 90 and g < 90
+        red += r > 160 and g < 90 and b < 90
+if set(seen) != wanted or len(seen) != len(wanted):
+    raise AssertionError(f"Missing or duplicate right-panel markers: {wanted-set(seen)}")
+if left_original < 2 or left_rotated != 1 or min(blue, red) < 100:
+    raise AssertionError(f"Missing left artwork, rotation, or continuation: {left_original}, {left_rotated}, {blue}, {red}")
+print(f"PASS: {len(paired)} paired pages, {len(seen)} right-side visible markers, repeated original={left_original}, rotated={left_rotated}.")
