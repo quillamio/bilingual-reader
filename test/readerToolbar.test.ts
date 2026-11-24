@@ -43,7 +43,7 @@ describe("reader toolbar recovery", function () {
   }
 
   function assertButtons(doc: Document, expected = 1) {
-    for (const name of ["toolbar", "refresh", "export", "native-pdf", "native-reading"]) {
+    for (const name of ["toolbar", "refresh", "export", "native-pdf", "native-reading", "side-by-side"]) {
       assert.lengthOf(doc.querySelectorAll(`.bilingual-reader-${name}-button`), expected);
     }
   }
