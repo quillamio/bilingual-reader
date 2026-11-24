@@ -18,6 +18,7 @@ export function buildNativeBilingualHTML(
   title: string,
   parser: NativeParser,
   transcriptOnly = false,
+  chineseOnly = false,
 ): string {
   const pageMarkup = pages.map(({ pageIndex, image, blocks }) => {
     if (!transcriptOnly && !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/u.test(image)) {
@@ -25,6 +26,11 @@ export function buildNativeBilingualHTML(
     }
     const paragraphs = blocks.map(({ block, translation }) => {
       const enTag = block.type === "heading" ? "h3" : "p";
+      if (chineseOnly) {
+        const tag = block.type === "heading" ? "h3" : "p";
+        return '<div class="unit"><' + tag + ' class="zh right">' +
+          escapeHTML(translation || "〔未翻译〕 " + block.text) + '</' + tag + '></div>';
+      }
       return '<div class="unit"><' + enTag + ' class="en">' +
         escapeHTML(block.text) + '</' + enTag + '><p class="zh">' +
         escapeHTML(translation || "〔此段未翻译〕") + '</p></div>';
@@ -34,7 +40,7 @@ export function buildNativeBilingualHTML(
       '<div class="page-label">Original PDF · page ' + (pageIndex + 1) + '</div>' +
       '<img alt="Original PDF page ' + (pageIndex + 1) + '" src="' + image + '">' + '</section>';
     return original + '<section class="translation-page" data-page="' + (pageIndex + 1) + '">' +
-      '<div class="page-label">中英对照 · 原始页 ' + (pageIndex + 1) + '</div>' +
+      '<div class="page-label">' + (chineseOnly ? "中文译文" : "中英对照") + " · 原始页 " + (pageIndex + 1) + '</div>' +
       (paragraphs || '<p class="empty">本页无可提取的正文；如为扫描版 PDF，需要 OCR。</p>') +
       '</section>';
   }).join("\n");
@@ -51,6 +57,8 @@ export function buildNativeBilingualHTML(
     "h3.en{font-size:11pt;margin:0;break-after:avoid-page}",
     "p.en{margin:0 0 1mm;overflow-wrap:anywhere}",
     "p.zh{margin:0 0 2.5mm;padding:0 0 0 2.5mm;color:#222;border-left:2pt solid #c7354a;white-space:pre-wrap;overflow-wrap:anywhere}",
+    ".right{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;margin:0 0 3mm;padding:0;border:0}",
+    "h3.right{font-size:11pt;break-after:avoid-page}",
     "p{orphans:2;widows:2;break-inside:auto}",
     ".empty{color:#777}",
   ].join("\n");
