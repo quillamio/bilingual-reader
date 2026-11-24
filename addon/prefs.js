@@ -1,4 +1,4 @@
-pref("engine", "pdftranslate");
+pref("engine", "google");
 pref("native.backend", "pdfjs");
 pref("native.doclingURL", "http://127.0.0.1:8786");
 pref("ollama.url", "http://127.0.0.1:11434");
