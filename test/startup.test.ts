@@ -2,7 +2,9 @@ import { assert } from "chai";
 import { config } from "../package.json";
 import { toggleBilingualReading } from "../src/bilingualReader";
 import { renderReaderToolbar } from "../src/readerToolbar";
-import { buildExportHTML } from "../src/readerUI";
+import { buildExportHTML, printHTMLToPDF } from "../src/readerUI";
+import { readPDFFile } from "../src/pdfVectorExport";
+import { PDFDocument } from "pdf-lib";
 import { freezePDFExportImages } from "../src/pdfExportAssets";
 import { clearTranslationCache } from "../src/translationCache";
 import { parseNormalPDFWithPDFJS, getNormalPDFProxy } from "../src/pdfNativeRuntime";
@@ -127,6 +129,53 @@ describe("startup", function () {
     assert.include(html, "figure, table, pre {\n    break-inside: auto !important");
     assert.include(html, "tr { break-inside: avoid-page");
     assert.notInclude(html, "figure, table, pre {\n    break-inside: avoid-page");
+  });
+
+  it("prints a real PDF with all numbered lines and an embedded red-blue figure", async function () {
+    this.timeout(120000);
+    const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("print-regression");
+    const root = doc.createElement("div");
+    root.id = "sdt-content";
+    root.style.cssText = "height:100vh;max-height:100vh;overflow:hidden;contain:strict;";
+    for (let i = 0; i < 144; i++) {
+      const text = doc.createElement("p");
+      text.textContent = "BRLINE" + String(i).padStart(4, "0") + " Original English text must remain visible.";
+      if (i % 12 === 11) {
+        text.style.cssText = "height:7px;max-height:7px;overflow:hidden;clip-path:inset(0 0 90% 0);";
+      }
+      root.append(text);
+      if (i === 72) {
+        const figure = doc.createElement("figure");
+        const img = doc.createElement("img");
+        img.setAttribute("src", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAYCAIAAAAzn+mLAAAAP0lEQVR4nO3OMRUAIAzEUIqGztWBepQgBglZbswXkJd6PSvhzI10dqQS5BBxiDhEHCIOEYeIQ8Qh4hBxiDhEPgIeAlIwVp1jAAAAAElFTkSuQmCC");
+        img.setAttribute("loading", "eager");
+        img.setAttribute("width", "240");
+        img.setAttribute("height", "120");
+        const caption = doc.createElement("figcaption");
+        caption.textContent = "BRFIGURE visible red-blue fixture";
+        figure.append(img, caption);
+        root.append(figure);
+      }
+    }
+    doc.body.append(root);
+    const temp = Zotero.getTempDirectory();
+    temp.append("br-actual-print-" + Date.now() + ".pdf");
+    try {
+      await printHTMLToPDF(buildExportHTML(doc, "Printed PDF regression"), temp);
+      const parsed = await PDFDocument.load(await readPDFFile(temp), { updateMetadata: false });
+      assert.isAtLeast(parsed.getPageCount(), 3);
+      // In CI the independent Python renderer verifies text and ink on every page.
+      // Locally the real-print smoke test still executes without a workspace path.
+      const c = (globalThis as any).Components;
+      const env = c.classes["@mozilla.org/process/environment;1"].getService(c.interfaces.nsIEnvironment);
+      const fixtureDir = env.get("BR_PDF_REGRESSION_DIR");
+      if (fixtureDir) {
+        const target = (Zotero.File as any).pathToFile(fixtureDir);
+        temp.copyTo(target, "legacy-reflow.pdf");
+      }
+    } finally {
+      if (temp.exists()) temp.remove(false);
+    }
   });
 
   it("should preserve existing data-url images in PDF export clones", async function () {
