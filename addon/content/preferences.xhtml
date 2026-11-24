@@ -12,7 +12,7 @@
     style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px"
   >
     在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。内置 Google 翻译默认免 API Key，
-    不需要额外安装 Translate for Zotero；也可选 Bing、Translate for Zotero 或 Ollama。
+    不需要额外安装 Translate for Zotero；也可选 Bing、Translate for Zotero 或 Ollama。设置会自动保存。
   </html:p>
 
   <hbox align="center" style="margin-bottom: 10px">
@@ -24,13 +24,15 @@
       <html:option value="pdftranslate">Translate for Zotero（兼容模式）</html:option>
       <html:option value="ollama">Ollama（本地/云端）</html:option>
     </html:select>
+    <html:span id="bilingualreader-engine-status" role="status"
+      style="margin-inline-start:10px;max-width:260px;white-space:normal;overflow-wrap:anywhere"></html:span>
   </hbox>
 </groupbox>
 
 <groupbox id="bilingualreader-builtin-section">
   <label><html:h3>内置免费翻译</html:h3></label>
   <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
-    内置翻译服务独立运行，不再依赖 Translate for Zotero。可选择免密钥网页翻译、商业 API 和自托管模型。
+    内置翻译服务独立运行，不再依赖 Translate for Zotero。可选择免密钥网页翻译、需密钥的 API 和自托管模型。
     文献正文将发送至所选在线服务（本地服务除外），免费网页接口并非官方保证稳定的 API；
     对敏感或未发表资料建议使用本地 Ollama。内置服务为保证段落对应关系逐段翻译。
   </html:p>
@@ -47,12 +49,11 @@
       测试此服务（实际发送短句，可能产生费用）
     </html:button>
     <html:span style="margin-left: 10px; max-width: 550px">
-      API Key 保存于 Zotero 本地偏好（非系统钥匙串）；清空密钥并保存即可删除。请勿共享包含凭据的配置。
+      API Key 保存于 Zotero 本地偏好（非系统钥匙串）；清空密钥即可删除。请勿共享包含凭据的配置。
     </html:span>
   </hbox>
-  <html:p style="line-height: 1.6; margin: 8px 0 0 0; max-width: 760px">
-    词典类（Cambridge、Bing Dict 等）不支持完整论文段落，Pot 只提供弹窗。
-    CNKI、Iciba 使用非官方网页加密接口，可能触发人工验证或随时失效，请勿用于敏感文献。
+  <html:p id="bilingualreader-dictionary-note" style="line-height:1.6;margin:8px 0 0">
+    词典类服务（不推荐用于长文翻译）：Cambridge、Bing Dict 等只支持查词。
   </html:p>
 </groupbox>
 
@@ -73,62 +74,91 @@
 </groupbox>
 
 <groupbox id="bilingualreader-native-section">
-  <label><html:h3>原始 PDF 解析（不依赖 Zotero 阅读模式）</html:h3></label>
-  <html:p style="line-height:1.65;margin:0 0 10px;max-width:760px">
-    点击普通 PDF 阅读器工具栏的「📑」可直接由 PDF.js 读取原始页面文字与坐标，
-    生成完整原始 PDF 页面 + 可复制中英译文页。直接复制原始 PDF 页面（非截图），保留图片、文字层及矢量图形；原始附件不修改。
-  </html:p>
+  <label><html:h3>双语阅读与 PDF 导出</html:h3></label>
   <hbox align="center" style="margin-bottom:9px">
-    <html:label for="bilingualreader-native-backend" style="min-width:140px">PDF 解析引擎</html:label>
-    <html:select id="bilingualreader-native-backend" style="min-width:320px;padding:4px 8px">
-      <html:option value="pdfjs">PDF.js（内置，推荐）</html:option>
-      <html:option value="docling">Docling（本地增强，可选）</html:option>
-      <html:option value="mineru">MinerU（云端 API）</html:option>
-      <html:option value="mistral">Mistral OCR（云端 API）</html:option>
-      <html:option value="llamaparse">LlamaParse（云端 API）</html:option>
+    <html:label for="bilingualreader-pdf-layout" style="min-width:140px">中英对照方式</html:label>
+    <html:select id="bilingualreader-pdf-layout" style="min-width:270px;padding:4px 8px">
+      <html:option value="stacked">上下对照（默认）</html:option>
+      <html:option value="side-by-side">左右对照</html:option>
     </html:select>
   </hbox>
-  <hbox align="center" style="margin-bottom:9px">
-    <html:label for="bilingualreader-docling-url" style="min-width:140px">本地 Docling 地址</html:label>
-    <html:input id="bilingualreader-docling-url" type="text"
-      style="width:380px;padding:4px 8px" placeholder="http://127.0.0.1:8786"/>
-    <html:button id="bilingualreader-test-docling" type="button"
-      style="margin-left:8px;padding:5px 10px">测试连接</html:button>
-  </hbox>
-  <html:p style="line-height:1.6;margin:0;max-width:760px">
-    Docling 需要另行在 Mac 安装 Python 与 Docling，然后运行源码中的
-    scripts/docling_local_server.py。Docling 仅连接 127.0.0.1/localhost；首次离线使用可能需要提前下载模型。
-    若 Docling 服务不可用，可手动回退 PDF.js。
-  </html:p>
-  <html:div id="bilingualreader-cloud-mineru-section" style="margin-top:12px">
-    <html:label for="bilingualreader-cloud-mineru-key">MinerU Token</html:label>
-    <html:input id="bilingualreader-cloud-mineru-key" type="password" autocomplete="off" style="width:340px;margin-left:8px"/>
-    <html:br/>
-    <html:label for="bilingualreader-cloud-mineru-model">模型（vlm / pipeline）</html:label>
-    <html:input id="bilingualreader-cloud-mineru-model" type="text" style="width:250px;margin:6px 8px"/>
+  <html:p id="bilingualreader-pdf-layout-note">点 🀄 按所选方式阅读，点 🖨️ 导出 PDF。</html:p>
+  <html:div id="bilingualreader-pdf2zh-section" hidden="hidden">
+    <hbox align="center" style="margin-bottom:9px">
+      <html:label for="bilingualreader-pdf2zh-url">本机 PDF2zh 服务</html:label>
+      <html:input id="bilingualreader-pdf2zh-url" type="text" style="margin-inline:8px;width:215px"/>
+      <html:button id="bilingualreader-test-pdf2zh" type="button">测试连接</html:button>
+      <html:span id="bilingualreader-pdf2zh-status" role="status" style="margin-inline-start:10px"/>
+    </hbox>
+    <html:p>左右导出使用 PDF2zh Next 自带的排版引擎。
+      <html:a id="bilingualreader-pdf2zh-link" href="https://github.com/guaguastandup/zotero-pdf2zh">本机服务安装说明</html:a>
+    </html:p>
   </html:div>
-  <html:div id="bilingualreader-cloud-mistral-section" style="margin-top:12px">
-    <html:label for="bilingualreader-cloud-mistral-key">Mistral API Key</html:label>
-    <html:input id="bilingualreader-cloud-mistral-key" type="password" autocomplete="off" style="width:340px;margin-left:8px"/>
-    <html:br/>
-    <html:label for="bilingualreader-cloud-mistral-model">OCR 模型</html:label>
-    <html:input id="bilingualreader-cloud-mistral-model" type="text" style="width:250px;margin:6px 8px"/>
-  </html:div>
-  <html:div id="bilingualreader-cloud-llamaparse-section" style="margin-top:12px">
-    <html:label for="bilingualreader-cloud-llamaparse-key">LlamaParse API Key</html:label>
-    <html:input id="bilingualreader-cloud-llamaparse-key" type="password" autocomplete="off" style="width:340px;margin-left:8px"/>
-    <html:br/>
-    <html:label for="bilingualreader-cloud-llamaparse-model">解析档位（agentic 等）</html:label>
-    <html:input id="bilingualreader-cloud-llamaparse-model" type="text" style="width:250px;margin:6px 8px"/>
-  </html:div>
-  <html:p style="line-height:1.6;max-width:760px">
-    云端解析服务使用各自独立 API Key，上传整个 PDF 前需确认，可能计费并由服务商处理数据。
-    密钥保存在 Zotero 本地偏好中，不是系统钥匙串；清空后保存可移除。PDF.js/Docling 解析不上传 PDF 到云端。
-  </html:p>
-  <hbox align="center" style="margin-top:10px">
-    <html:input type="checkbox" id="bilingualreader-export-original-appendix"/>
-    <html:label for="bilingualreader-export-original-appendix">旧版重排导出附加原始 PDF 全页（推荐，避免漏图；文件会增加页数）</html:label>
-  </hbox>
+  <html:details id="bilingualreader-pdf-troubleshooting">
+    <html:summary style="cursor:pointer;margin-bottom:9px">如果导出遇到问题再进行以下设置</html:summary>
+    <hbox align="center" style="margin-bottom:9px">
+      <html:input type="checkbox" id="bilingualreader-use-original-export"/>
+      <html:label for="bilingualreader-use-original-export">上下对照导出时使用原版保真模式</html:label>
+    </hbox>
+    <html:p>原版保真模式保留原始 PDF 的页面和图表，后面附按页码生成的双语译文。</html:p>
+    <html:p>下方解析引擎用于左右阅读面板和原版保真导出。默认上下阅读与重排导出使用 Zotero 阅读模式。左右 PDF 导出使用 PDF2zh Next。</html:p>
+    <hbox align="center" style="margin-bottom:9px">
+      <html:label for="bilingualreader-native-backend" style="min-width:140px">PDF 解析引擎</html:label>
+      <html:select id="bilingualreader-native-backend" style="min-width:320px;padding:4px 8px">
+        <html:option value="pdfjs">PDF.js（内置，推荐）</html:option>
+        <html:option value="docling">Docling（本地增强，可选）</html:option>
+        <html:option value="mineru">MinerU（云端 API）</html:option>
+        <html:option value="mistral">Mistral OCR（云端 API）</html:option>
+        <html:option value="llamaparse">LlamaParse（云端 API）</html:option>
+      </html:select>
+    </hbox>
+    <html:div id="bilingualreader-docling-section" hidden="hidden">
+      <hbox align="center" style="margin-bottom:9px">
+        <html:label for="bilingualreader-docling-url" style="min-width:140px">本地 Docling 地址</html:label>
+        <html:input id="bilingualreader-docling-url" type="text"
+          style="width:380px;padding:4px 8px" placeholder="http://127.0.0.1:8786"/>
+        <html:button id="bilingualreader-test-docling" type="button"
+          style="margin-left:8px;padding:5px 10px">测试连接</html:button>
+        <html:span id="bilingualreader-docling-status" role="status" style="margin-inline-start:10px"></html:span>
+      </hbox>
+      <html:p style="line-height:1.6;margin:0;max-width:760px">
+        Docling 需要另行在 Mac 安装 Python 与 Docling，然后运行源码中的
+        scripts/docling_local_server.py。Docling 仅连接 127.0.0.1/localhost；首次离线使用可能需要提前下载模型。
+        若 Docling 服务不可用，可手动回退 PDF.js。
+      </html:p>
+    </html:div>
+    <html:div id="bilingualreader-cloud-mineru-section" hidden="hidden" style="margin-top:12px">
+      <html:p><html:a id="bilingualreader-mineru-link" href="https://mineru.net/apiManage/docs?openApplyModal=true">申请 MinerU Token</html:a></html:p>
+      <html:label for="bilingualreader-cloud-mineru-key">MinerU Token</html:label>
+      <html:input id="bilingualreader-cloud-mineru-key" type="password" autocomplete="off" style="width:340px;margin-left:8px"/>
+      <html:br/>
+      <html:label for="bilingualreader-cloud-mineru-model">模型（vlm / pipeline）</html:label>
+      <html:input id="bilingualreader-cloud-mineru-model" type="text" style="width:250px;margin:6px 8px"/>
+      <html:p>
+        <html:button id="bilingualreader-test-mineru" type="button">验证 Token</html:button>
+        <html:span id="bilingualreader-mineru-status" role="status" style="margin-inline-start:10px"></html:span>
+      </html:p>
+      <html:p>验证只向 MinerU 请求上传地址，无需上传 PDF。</html:p>
+    </html:div>
+    <html:div id="bilingualreader-cloud-mistral-section" hidden="hidden" style="margin-top:12px">
+      <html:label for="bilingualreader-cloud-mistral-key">Mistral API Key</html:label>
+      <html:input id="bilingualreader-cloud-mistral-key" type="password" autocomplete="off" style="width:340px;margin-left:8px"/>
+      <html:br/>
+      <html:label for="bilingualreader-cloud-mistral-model">OCR 模型</html:label>
+      <html:input id="bilingualreader-cloud-mistral-model" type="text" style="width:250px;margin:6px 8px"/>
+    </html:div>
+    <html:div id="bilingualreader-cloud-llamaparse-section" hidden="hidden" style="margin-top:12px">
+      <html:label for="bilingualreader-cloud-llamaparse-key">LlamaParse API Key</html:label>
+      <html:input id="bilingualreader-cloud-llamaparse-key" type="password" autocomplete="off" style="width:340px;margin-left:8px"/>
+      <html:br/>
+      <html:label for="bilingualreader-cloud-llamaparse-model">解析档位（agentic 等）</html:label>
+      <html:input id="bilingualreader-cloud-llamaparse-model" type="text" style="width:250px;margin:6px 8px"/>
+    </html:div>
+    <html:p style="line-height:1.6;max-width:760px">
+      云端解析服务使用各自独立 API Key，上传整个 PDF 前需确认，可能计费并由服务商处理数据。
+      密钥保存在 Zotero 本地偏好中，不是系统钥匙串；清空即可移除。PDF.js/Docling 解析不上传 PDF 到云端。
+    </html:p>
+  </html:details>
 </groupbox>
 
 <groupbox id="bilingualreader-page-section">
@@ -146,7 +176,7 @@
       style="width: 110px; padding: 4px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 1 页。常用于跳过论文最后的参考文献页；设为 0 表示不按页数跳过。</html:span
+      >默认跳过 1 页，至少保留第 1 页。设为 0 翻译全部页面。</html:span
     >
   </hbox>
   <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
@@ -261,12 +291,10 @@
   </hbox>
 
   <hbox align="center">
-    <html:button id="bilingualreader-save" type="button" style="padding: 6px 16px"
-      >保存设置</html:button
-    >
     <html:span
       id="bilingualreader-settings-status"
-      style="margin-left: 12px; line-height: 1.5"
+      role="status"
+      style="line-height: 1.5"
     ></html:span>
   </hbox>
 </groupbox>

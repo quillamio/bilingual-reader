@@ -8,6 +8,10 @@ declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
       "engine": string;
+      "native.backend": string;
+      "pdf.layout": string;
+      "export.useOriginal": boolean;
+      "native.doclingURL": string;
       "ollama.url": string;
       "ollama.model": string;
       "requestGapMs": number;

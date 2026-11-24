@@ -4,12 +4,13 @@
  * vector artwork. Document-level bookmarks, forms and signatures are not
  * guaranteed to survive a new combined PDF; the source attachment is untouched.
  */
-import { PDFDocument, degrees, rgb, type PDFPage } from "pdf-lib";
+import type { PDFDocument, PDFPage } from "pdf-lib";
 
 export async function combinePDFPages(
   original: Uint8Array, bilingual: Uint8Array, originalFirst = true,
   expectedOriginalPages?: number,
 ): Promise<Uint8Array> {
+  const { PDFDocument } = await import("pdf-lib");
   const source = await PDFDocument.load(original, { updateMetadata: false });
   const transcript = await PDFDocument.load(bilingual, { updateMetadata: false });
   const sourceCount = source.getPageCount();
@@ -90,8 +91,9 @@ export async function appendOriginalPDF(
  * PDF page rotation is clockwise; drawPage's rotation is counter-clockwise.
  * Embed the visible CropBox, not the entire MediaBox.
  */
-async function drawPanel(out: PDFDocument, target: PDFPage, source: PDFPage,
-  left: number, bottom: number, width: number, height: number): Promise<void> {
+async function preparePanel(out: PDFDocument, source: PDFPage,
+  left: number, bottom: number, width: number, height: number,
+  degrees: typeof import("pdf-lib").degrees): Promise<((target: PDFPage) => void) | undefined> {
   const box = source.getCropBox();
   if (!source.node.Contents()) return; // a genuinely blank original page
   if (!(box.width > 0 && box.height > 0)) throw new Error("无效 PDF 页面裁切框。");
@@ -109,7 +111,8 @@ async function drawPanel(out: PDFDocument, target: PDFPage, source: PDFPage,
   const embedded = await out.embedPage(source, {
     left: box.x, bottom: box.y, right: box.x + box.width, top: box.y + box.height,
   });
-  target.drawPage(embedded, { x, y, width: w, height: h, rotate: degrees(-rotation) });
+  const options = { x, y, width: w, height: h, rotate: degrees(-rotation) };
+  return (target) => target.drawPage(embedded, options);
 }
 
 /** Each source page is matched to all independently printed translation pages.
@@ -120,26 +123,28 @@ export async function composeSideBySidePDF(
   original: Uint8Array, transcripts: AsyncIterable<{ pageIndex: number; bytes: Uint8Array }>,
   expectedPages?: number,
 ): Promise<Uint8Array> {
+  const { PDFDocument, degrees, rgb } = await import("pdf-lib");
   const source = await PDFDocument.load(original, { updateMetadata: false });
   const count = source.getPageCount();
   if (!count || (expectedPages !== undefined && count !== expectedPages)) {
     throw new Error("左右对照：原始页数不匹配。");
   }
   const out = await PDFDocument.create();
+  const panelW = 595.28, panelH = 841.89, gutter = 16;
   let index = 0, sheets = 0;
   for await (const entry of transcripts) {
     if (entry.pageIndex !== index || index >= count) throw new Error("左右对照：译文页顺序错误或缺页。");
     const translated = await PDFDocument.load(entry.bytes, { updateMetadata: false });
     if (!translated.getPageCount()) throw new Error("左右对照：译文页面为空。");
-    const originalPage = source.getPage(index);
+    const drawOriginal = await preparePanel(out, source.getPage(index), 0, 0, panelW, panelH, degrees);
     for (const rightPage of translated.getPages()) {
-      const panelW = 595.28, panelH = 841.89, gutter = 16;
+      const drawTranslation = await preparePanel(out, rightPage, panelW + gutter, 0, panelW, panelH, degrees);
       const sheet = out.addPage([panelW * 2 + gutter, panelH]);
       sheet.drawLine({ start: { x: panelW + gutter / 2, y: 12 },
         end: { x: panelW + gutter / 2, y: panelH - 12 },
         thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
-      await drawPanel(out, sheet, originalPage, 0, 0, panelW, panelH);
-      await drawPanel(out, sheet, rightPage, panelW + gutter, 0, panelW, panelH);
+      drawOriginal?.(sheet);
+      drawTranslation?.(sheet);
       sheets++;
     }
     index++;

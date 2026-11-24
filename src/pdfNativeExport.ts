@@ -4,7 +4,7 @@
  * are retained by copying actual source PDF pages.
  */
 import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getRequestGapMs,
-  getSkipLastPages, getMaxConsecutiveErrors } from "./settings";
+  getTranslationPageCount, getMaxConsecutiveErrors } from "./settings";
 import { loadCachedTranslation, saveCachedTranslation } from "./translationCache";
 import { buildBatchPayload, packBatchItems, parseBatchResult, splitTextForRequest,
   type BatchInput } from "./translationPipeline";
@@ -14,9 +14,9 @@ import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "
 import { getNormalPDFProxy, parseNormalPDFWithPDFJS } from "./pdfNativeRuntime";
 import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
 import { parseWithCloudProvider } from "./pdfCloudParsers";
-import { appendOriginalPDF, readOriginalAttachment, composeSideBySidePDF, readPDFFile, writePDFFile } from "./pdfVectorExport";
+import { appendOriginalPDF, readOriginalAttachment } from "./pdfVectorExport";
 import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
-import { type NativeDocument, type NativeBlock } from "./pdfNativeModel";
+import { describePDFParser, PDF_PARSER_NAMES, type NativeDocument, type NativeBlock } from "./pdfNativeModel";
 import { buildNativeBilingualHTML, type NativeExportPage } from "./pdfNativeHtml";
 
 const active = new WeakSet<object>();
@@ -70,7 +70,7 @@ export async function translateNativeDocument(
   const engine = getEngine();
   if (isManagedService(engine)) assertServiceConfigured(engine);
   const engineTag = getCacheEngineTag(undefined, engine);
-  const cutoff = document.pages.length - getSkipLastPages();
+  const cutoff = getTranslationPageCount(document.pages.length);
   const pending: Array<NativeBlock & BatchInput> = [];
   const translated = new Map<string, string>();
   for (const page of document.pages) {
@@ -129,7 +129,7 @@ export async function translateNativeDocument(
 
 /** Export original PDF pages, then bilingual searchable transcript by source page. */
 export async function exportNativePDFBilingual(
-  reader: any, button: HTMLButtonElement | null = null, sideBySide = false,
+  reader: any, button: HTMLButtonElement | null = null,
 ): Promise<void> {
   if (!reader || typeof reader !== "object" || active.has(reader)) return;
   active.add(reader);
@@ -144,12 +144,12 @@ export async function exportNativePDFBilingual(
     if (!attachment) throw new Error("找不到当前 PDF 附件。");
 
     if (!confirm(reader, "将直接解析原始 PDF 的 " + handle.pdf.numPages +
-      " 页，完整复制原始 PDF 页面并附加可搜索的英中译文页。\n" +
+      " 页，生成可搜索的双语 PDF。\n" +
       "翻译文字将发送至当前选择的翻译后端（不发送页面图像）。\n" +
-      (sideBySide ? "左侧原始 PDF，右侧中文译文；长译文自动续页。" : "原始 PDF 页面完整复制在前部，后附按页码组织的双语译文。") + "\n\n继续？")) return;
+      "原始 PDF 页面完整复制在前部，后附按页码组织的双语译文。\n\n继续？")) return;
 
     progress(button, "正在提取 PDF.js 文本...");
-    const fallback = await parseNormalPDFWithPDFJS(handle.pdf,
+    const fallback = await parseNormalPDFWithPDFJS(handle,
       ({ page, pages }) => progress(button, "解析 PDF：" + page + "/" + pages));
     let parsed = fallback;
     const provider = getNativePDFBackend();
@@ -158,7 +158,7 @@ export async function exportNativePDFBilingual(
         "即将把完整原始 PDF 上传到 " + CLOUD_NAMES[provider] +
         "，可能产生费用并受服务商数据处理政策约束。敏感/未发表文献建议使用本地解析。\n\n同意上传？")) return;
       try {
-        progress(button, "正在解析：" + provider);
+        progress(button, "正在解析：" + PDF_PARSER_NAMES[provider]);
         const bytes = await readOriginalAttachment(attachment);
         parsed = provider === "docling"
           ? await parseWithLocalDocling(bytes, getDoclingEndpoint(), fallback)
@@ -173,12 +173,13 @@ export async function exportNativePDFBilingual(
     if (parsed.pages.every((page) => page.blocks.length === 0) &&
       !confirm(reader, "PDF 未提取到文字，可能是扫描版。是否仅输出原始页面画面？")) return;
 
-    progress(button, "正在翻译 PDF.js 文本...");
+    const parserStatus = describePDFParser(parsed, provider);
+    progress(button, parserStatus + " · 正在翻译…");
     const translated = await translateNativeDocument(
       parsed, itemID, String(attachment.key || itemID),
-      (done, total) => progress(button, "翻译：" + done + "/" + total),
+      (done, total) => progress(button, parserStatus + " · 翻译 " + done + "/" + total),
     );
-    const cutoff = parsed.pages.length - getSkipLastPages();
+    const cutoff = getTranslationPageCount(parsed.pages.length);
     const missing = parsed.pages.reduce((sum, page) =>
       sum + page.blocks.filter((block) =>
         page.index < cutoff && canTranslate(block) && !translated.has(block.id)).length, 0);
@@ -192,41 +193,23 @@ export async function exportNativePDFBilingual(
       })),
     }));
     const title = String(attachment.getField?.("title") || "文献") + " - PDF.js 双语";
-    const html = buildNativeBilingualHTML(exportPages, title, parsed.source, true);
     const temp = Zotero.getTempDirectory();
     temp.append("native-bilingual-" + Date.now() + "-" +
       Math.random().toString(36).slice(2, 9) + ".pdf");
     const combined = Zotero.getTempDirectory();
     combined.append("native-combined-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".pdf");
     try {
-      if (sideBySide) {
-        const original = await readOriginalAttachment(attachment);
-        async function* transcripts() {
-          for (const page of exportPages) {
-            progress(button, "左右对照排版：" + (page.pageIndex + 1) + "/" + exportPages.length);
-            try {
-              if (temp.exists()) temp.remove(false);
-              await printHTMLToPDF(buildNativeBilingualHTML([page], title, parsed.source, true, true), temp);
-              yield { pageIndex: page.pageIndex, bytes: await readPDFFile(temp) };
-            } finally { if (temp.exists()) temp.remove(false); }
-          }
-        }
-        const paired = await composeSideBySidePDF(original, transcripts(), parsed.pages.length);
-        await writePDFFile(combined, paired);
-      } else {
-        progress(button, "正在打印双语译文...");
-        await printHTMLToPDF(html, temp);
-        progress(button, "正在复制原始 PDF 矢量页面并检查页数...");
-        await appendOriginalPDF(temp, attachment, combined, true, parsed.pages.length);
-      }
-      await importExportedPDF(combined, attachment, sideBySide ? "左右对照翻译" : "原版保真中英对照");
+      progress(button, "正在打印双语译文...");
+      await printHTMLToPDF(buildNativeBilingualHTML(exportPages, title, parsed.source, true), temp);
+      progress(button, "正在复制原始 PDF 矢量页面并检查页数...");
+      await appendOriginalPDF(temp, attachment, combined, true, parsed.pages.length);
+      await importExportedPDF(combined, attachment, "原版保真中英对照");
     } finally {
       for (const file of [temp, combined]) {
         try { if (file.exists()) file.remove(false); } catch (_) { /* Temp only */ }
       }
     }
-    notify(reader, (sideBySide ? "左右对照导出成功。左侧原始页，右侧中文译文；长译文自动续页。" : "双语导出成功。原始 PDF 页面及图表已复制，后附双语文本。") +
-      "\n解析方式：" + parsed.source +
+    notify(reader, "双语导出成功。原始 PDF 页面及图表已复制，后附双语文本。\n" + parserStatus +
       (parsed.warnings.length ? "\n提示：" + parsed.warnings.slice(0, 3).join("；") : ""));
   } catch (error) {
     Zotero.logError(error as Error);
@@ -235,39 +218,4 @@ export async function exportNativePDFBilingual(
     active.delete(reader);
     progress(button, oldTitle);
   }
-}
-
-const CLASS_NAME = "bilingual-reader-native-pdf-button";
-export function renderNativePDFToolbarButton(event: any): void {
-  const { reader, doc, append } = event || {};
-  if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
-  for (const sideBySide of [false, true]) {
-  const className = sideBySide ? "bilingual-reader-side-by-side-button" : CLASS_NAME;
-  if (doc.querySelector("." + className)) continue;
-  const button = doc.createElement("button") as HTMLButtonElement;
-  button.type = "button";
-  button.className = "toolbar-button " + className;
-  button.textContent = sideBySide ? "◫" : "📑";
-  button.title = sideBySide ? "PDF 左右对照翻译（原文｜译文）" : "PDF.js 原始 PDF 直接解析与双语导出（无需阅读模式）";
-  button.setAttribute("aria-label", button.title);
-  button.style.cssText = "min-width:34px;padding-inline:5px;font-size:18px;line-height:1";
-  button.addEventListener("click", (event: Event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (button.disabled) return;
-    button.disabled = true;
-    void exportNativePDFBilingual(reader, button, sideBySide).finally(() => {
-      button.disabled = false;
-    });
-  });
-  append(button);
-  }
-}
-export function cleanupNativePDFToolbarButton(reader: any): void {
-  try {
-    for (const name of [CLASS_NAME, "bilingual-reader-side-by-side-button"]) {
-      reader?._iframeWindow?.document?.querySelector("." + name)?.remove();
-    }
-  }
-  catch (_) { /* Viewer closed */ }
 }

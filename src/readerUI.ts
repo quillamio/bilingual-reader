@@ -1,6 +1,6 @@
-import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName, getExportOriginalAppendix } from "./pdfExportUtils";
-import { freezePDFExportImages } from "./pdfExportAssets";
-import { appendOriginalPDF } from "./pdfVectorExport";
+import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAssets";
+import { getPDFLayout, getSkipLastPages, getUseOriginalPDFExport } from "./settings";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -234,6 +234,8 @@ export function buildExportHTML(doc: Document, title: string, preparedRoot?: HTM
   }
   figure { margin: 8pt 0; max-width: 100%; overflow: visible; }
   figure img, figure svg, figure canvas { max-height: 225mm !important; }
+  .sdt-source-crop-page { max-width: 100%; aspect-ratio: auto !important; }
+  .sdt-source-crop-page img { display: block; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -432,7 +434,64 @@ export async function printHTMLToPDF(html: string, tempFile: any): Promise<void>
   }
 }
 
-export async function exportBilingualPDF(reader: any): Promise<void> {
+const activePDF2zhExports = new Set<number>();
+
+async function exportPDF2zhBilingual(reader: any, button: HTMLButtonElement | null): Promise<void> {
+  const itemID = Number(reader?.itemID || 0);
+  if (activePDF2zhExports.has(itemID)) return;
+  const attachment = itemID ? Zotero.Items.get(itemID) : null;
+  if (!attachment?.parentItemID) {
+    showMessage(reader, "请打开属于某条文献的 PDF 附件，再导出左右对照。");
+    return;
+  }
+
+  const { generatePDF2zhDualPDF, getPDF2zhEndpoint, getPDF2zhService } = await import("./pdf2zhExport");
+  if (activePDF2zhExports.has(itemID)) return;
+  const endpoint = getPDF2zhEndpoint();
+  const service = getPDF2zhService();
+  if (!confirmMessage(reader, `左右对照将由本机 Zotero PDF2zh 生成。原 PDF 交给本机服务，正文由 ${service} 翻译。结果左侧为原文、右侧为保留原版式的译文。继续导出？`)) return;
+
+  activePDF2zhExports.add(itemID);
+  const oldTitle = button?.title || "";
+  const progress = (message: string) => {
+    if (!button) return;
+    button.title = message;
+    button.setAttribute("aria-label", message);
+  };
+  const temporary = Zotero.getTempDirectory();
+  temporary.append(`br-pdf2zh-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.pdf`);
+  try {
+    const { readOriginalAttachment, writePDFFile } = await import("./pdfVectorExport");
+    const { getNormalPDFProxy } = await import("./pdfNativeRuntime");
+    const input = await readOriginalAttachment(attachment);
+    const pages = Number(getNormalPDFProxy(reader)?.pdf.numPages || 0);
+    const skip = Math.max(0, Math.min(pages - 1, getSkipLastPages()));
+    const output = await generatePDF2zhDualPDF(input, skip, progress, endpoint, service);
+    await writePDFFile(temporary, output);
+    await importExportedPDF(temporary, attachment, "左右对照（PDF2zh）");
+    showMessage(reader, "PDF2zh 左右对照导出成功，已保存到当前文献附件。");
+  } catch (error) {
+    showMessage(reader, "左右对照导出失败：" + (error as Error).message);
+  } finally {
+    try { if (temporary.exists()) temporary.remove(false); }
+    finally {
+      activePDF2zhExports.delete(itemID);
+      progress(oldTitle);
+    }
+  }
+}
+
+export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null): Promise<void> {
+  if (getPDFLayout() === "side-by-side") {
+    await exportPDF2zhBilingual(reader, button);
+    return;
+  }
+  if (getUseOriginalPDFExport()) {
+    const { exportNativePDFBilingual } = await import("./pdfNativeExport");
+    await exportNativePDFBilingual(reader, button);
+    return;
+  }
+
   const doc = getSDTDocument(reader);
   if (!doc?.querySelector("#sdt-content")) {
     showMessage(reader, "请先在 Zotero 阅读模式中开启中英对照，再导出 PDF。");
@@ -458,8 +517,7 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   if (
     !confirmMessage(
       reader,
-      "将生成一个新的中英对照 PDF，并作为附件加入这篇文献的 Zotero 条目。" +
-      (getExportOriginalAppendix() ? "\n将附加完整原始 PDF 页面，避免科研图表漏失。" : "") + "\n\n继续导出？",
+      "将生成一个新的中英对照 PDF，并作为附件加入这篇文献的 Zotero 条目。\n\n继续导出？",
     )
   ) {
     return;
@@ -487,33 +545,17 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
     // A timestamped file should normally not exist.
   }
 
-  const combinedFile = Zotero.getTempDirectory();
-  combinedFile.append("br-combined-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".pdf");
-  let importedAttachment: any = null;
-  let preserveOriginal = getExportOriginalAppendix();
   try {
     const liveRoot = doc.querySelector("#sdt-content") as HTMLElement;
+    await preparePDFExportFigures(getActiveSDTView(reader), liveRoot);
     const exportClone = liveRoot.cloneNode(true) as HTMLElement;
     const assets = await freezePDFExportImages(liveRoot, exportClone);
-    if (assets.failed || assets.absentFigureCaptions) {
-      const parts: string[] = [];
-      if (assets.failed) parts.push(`${assets.failed} 个图片/Canvas 资源无法直接嵌入`);
-      if (assets.absentFigureCaptions) {
-        parts.push(`${assets.absentFigureCaptions} 个图注附近没有发现可导出的图片元素`);
-      }
-      if (!confirmMessage(reader,
-        `检测到可能缺失的图片：${parts.join("；")}。\n\n` +
-        "将保留完整原始 PDF 页面作为附录，确保原图可查阅；重排正文中可能仍缺图。是否继续？")) {
-        return;
-      }
-      preserveOriginal = true;
-    }
+    if ((assets.failed || assets.absentFigureCaptions) && !confirmMessage(reader,
+      `有 ${assets.failed} 个图像资源无法嵌入，${assets.absentFigureCaptions} 个图注未找到对应图片。是否继续导出已读取的内容？`)) return;
+
     const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
     await printHTMLToPDF(html, tempFile);
-    if (preserveOriginal) {
-      await appendOriginalPDF(tempFile, sourceAttachment, combinedFile, false);
-    }
-    importedAttachment = await importExportedPDF(preserveOriginal ? combinedFile : tempFile, sourceAttachment);
+    await importExportedPDF(tempFile, sourceAttachment);
   } catch (error: any) {
     Zotero.logError(error as Error);
     showMessage(reader, `导出中英对照 PDF 失败：${error?.message || String(error)}`);
@@ -521,16 +563,12 @@ export async function exportBilingualPDF(reader: any): Promise<void> {
   } finally {
     try {
       if (tempFile.exists()) tempFile.remove(false);
-      if (combinedFile.exists()) combinedFile.remove(false);
     } catch (_) {
       // The imported Zotero attachment has already copied the file.
     }
   }
 
-  if (importedAttachment) {
-    showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。" +
-      (preserveOriginal ? "\n已附加完整原始 PDF 页面，原始图表可在附录查阅。" : ""));
-  }
+  showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。");
 }
 
 export function renderReaderExportButton(event: any): void {
@@ -547,7 +585,7 @@ export function renderReaderExportButton(event: any): void {
         (button) => {
           if (button.disabled) return;
           button.disabled = true;
-          void exportBilingualPDF(reader).finally(() => {
+          void exportBilingualPDF(reader, button).finally(() => {
             button.disabled = false;
           });
         },

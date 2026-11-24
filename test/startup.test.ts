@@ -1,6 +1,7 @@
 import { assert } from "chai";
 import { config } from "../package.json";
-import { toggleBilingualReading } from "../src/bilingualReader";
+import { refreshBilingualReading, toggleBilingualReading } from "../src/bilingualReader";
+import { getTranslationPageCount } from "../src/settings";
 import { renderReaderToolbar } from "../src/readerToolbar";
 import { buildExportHTML, printHTMLToPDF } from "../src/readerUI";
 import { readPDFFile, composeSideBySidePDF, writePDFFile } from "../src/pdfVectorExport";
@@ -73,7 +74,10 @@ describe("startup", function () {
         win?.document.getElementById("bilingualreader-pdftranslate-policy")?.textContent || "",
         "固定跟随 Translate for Zotero 当前默认服务",
       );
-      assert.exists(win?.document.getElementById("bilingualreader-save"));
+      assert.equal((win?.document.getElementById("bilingualreader-pdf-layout") as HTMLSelectElement).value, "stacked");
+      assert.isFalse((win?.document.getElementById("bilingualreader-pdf-troubleshooting") as HTMLDetailsElement).open);
+      assert.notExists(win?.document.getElementById("bilingualreader-export-original-appendix"));
+      assert.notExists(win?.document.getElementById("bilingualreader-save"));
       assert.equal(
         (win?.document.getElementById("bilingualreader-github-link") as HTMLAnchorElement | null)
           ?.href,
@@ -302,7 +306,7 @@ describe("startup", function () {
     } };
     const handle = getNormalPDFProxy(reader);
     assert.equal(handle?.pdf, fakePDF);
-    const result = await parseNormalPDFWithPDFJS(handle!.pdf);
+    const result = await parseNormalPDFWithPDFJS(handle!);
     assert.equal(result.source, "pdfjs");
     assert.equal(result.pages.length, 1);
     assert.equal(result.pages[0].blocks[0].type, "caption");
@@ -321,7 +325,7 @@ describe("startup", function () {
     }
   });
 
-  it("should render every reader toolbar icon once without post-render DOM rewrites", function () {
+  it("renders only the three original toolbar controls by default", function () {
     const doc = Zotero.getMainWindow().document.implementation.createHTMLDocument("toolbar-test");
     const reader = { type: "pdf", itemID: 2147483644 };
     const append = (...elements: HTMLElement[]) => doc.body.append(...elements);
@@ -332,49 +336,154 @@ describe("startup", function () {
     assert.equal(doc.querySelectorAll(".bilingual-reader-toolbar-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-refresh-button").length, 1);
     assert.equal(doc.querySelectorAll(".bilingual-reader-export-button").length, 1);
-    assert.equal(doc.querySelectorAll(".bilingual-reader-native-pdf-button").length, 1);
-    assert.equal(doc.querySelectorAll(".bilingual-reader-native-reading-button").length, 1);
-    assert.equal(doc.querySelectorAll(".bilingual-reader-side-by-side-button").length, 1);
+    assert.notExists(doc.querySelector(".bilingual-reader-native-pdf-button"));
+    assert.notExists(doc.querySelector(".bilingual-reader-native-reading-button"));
+    assert.notExists(doc.querySelector(".bilingual-reader-side-by-side-button"));
     assert.equal(doc.querySelector(".bilingual-reader-toolbar-button")?.textContent, "🀄");
     assert.equal(doc.querySelector(".bilingual-reader-export-button")?.textContent, "🖨️");
     assert.notExists(doc.querySelector(".bilingual-reader-settings-button"));
     assert.notExists(doc.querySelector(".bilingual-reader-wordwise-button"));
   });
 
-  it("should save the engine and trailing-page settings from Zotero preferences", async function () {
+  it("automatically saves valid edits and restores them when preferences reopen", async function () {
     this.timeout(10000);
-    const enginePref = "extensions.zotero.bilingualreader.engine";
-    const skipPref = "extensions.zotero.bilingualreader.skipLastPages";
-    const previousEngine = Zotero.Prefs.get(enginePref, true);
-    const previousSkip = Zotero.Prefs.get(skipPref, true);
-    const win = Zotero.Utilities.Internal.openPreferences("bilingual-reader-preferences");
-    assert.exists(win);
+    const prefix = "extensions.zotero.bilingualreader.";
+    const keys = ["engine", "skipLastPages", "pdf.layout", "native.doclingURL", "ollama.model"];
+    const previous = keys.map((key) => Zotero.Prefs.get(prefix + key, true));
 
-    try {
+    async function openSettings() {
+      const win = Zotero.Utilities.Internal.openPreferences("bilingual-reader-preferences")!;
+      assert.exists(win);
       for (let attempt = 0; attempt < 100; attempt++) {
-        if (win?.document.getElementById("bilingualreader-save")) break;
+        if (win.document.getElementById("bilingualreader-settings-root")?.dataset.initialized === "true") return win;
         await Zotero.Promise.delay(50);
       }
+      throw new Error("Preferences did not load");
+    }
 
-      const engine = win?.document.getElementById("bilingualreader-engine") as HTMLSelectElement;
-      const skipLastPages = win?.document.getElementById(
-        "bilingualreader-skip-last-pages",
-      ) as HTMLInputElement;
-      const save = win?.document.getElementById("bilingualreader-save") as HTMLButtonElement;
+    let win = await openSettings();
+    try {
+      const control = (name: string) => win.document.getElementById("bilingualreader-" + name) as HTMLInputElement;
+      const edit = (name: string, value: string, event: string) => {
+        const field = control(name);
+        field.value = value;
+        field.dispatchEvent(new win.Event(event));
+      };
 
-      engine.value = "ollama";
-      engine.dispatchEvent(new win!.Event("change"));
-      skipLastPages.value = "2";
-      save.click();
+      edit("engine", "ollama", "change");
+      assert.equal(Zotero.Prefs.get(prefix + "engine", true), "ollama");
+      edit("docling-url", "https://example.com", "input");
+      assert.equal(control("docling-url").getAttribute("aria-invalid"), "true");
+      assert.equal(Zotero.Prefs.get(prefix + "native.doclingURL", true), previous[3]);
 
-      assert.equal(Zotero.Prefs.get(enginePref, true), "ollama");
-      assert.equal(Zotero.Prefs.get(skipPref, true), 2);
+      edit("skip-last-pages", "2", "input");
+      edit("skip-last-pages", "", "input");
+      assert.equal(Zotero.Prefs.get(prefix + "skipLastPages", true), 2);
+      edit("skip-last-pages", "3", "input");
+      assert.isNull(control("skip-last-pages").getAttribute("aria-invalid"));
+      edit("pdf-layout", "side-by-side", "change");
+      assert.equal(Zotero.Prefs.get(prefix + "pdf.layout", true), "side-by-side");
+      control("ollama-model").focus();
+      edit("ollama-model", "autosave-test-model", "input");
+
+      win.close();
+      win = await openSettings();
+      assert.equal(control("engine").value, "ollama");
+      assert.equal(control("skip-last-pages").value, "3");
+      assert.equal(control("ollama-model").value, "autosave-test-model");
+      assert.equal(control("pdf-layout").value, "side-by-side");
+      assert.isFalse(control("pdf2zh-section").hidden);
     } finally {
-      win?.close();
-      if (previousEngine === undefined) Zotero.Prefs.clear(enginePref, true);
-      else Zotero.Prefs.set(enginePref, previousEngine, true);
-      if (previousSkip === undefined) Zotero.Prefs.clear(skipPref, true);
-      else Zotero.Prefs.set(skipPref, previousSkip, true);
+      win.close();
+      for (const [index, key] of keys.entries()) {
+        if (previous[index] === undefined) Zotero.Prefs.clear(prefix + key, true);
+        else Zotero.Prefs.set(prefix + key, previous[index], true);
+      }
+    }
+  });
+
+  it("shows inline results for GLM and MinerU and switches parser fields", async function () {
+    this.timeout(10000);
+    const prefix = "extensions.zotero.bilingualreader.";
+    const keys = ["engine", "services.glm47flash.secret", "services.glm47flash.revision",
+      "native.backend", "native.cloud.mineru.key"];
+    const previous = keys.map((key) => Zotero.Prefs.get(prefix + key, true));
+    const originalRequest = Zotero.HTTP.request;
+    const requests: Array<{method: string; url: string; options: any}> = [];
+    const win = Zotero.Utilities.Internal.openPreferences("bilingual-reader-preferences")!;
+    const control = (id: string) => win.document.getElementById("bilingualreader-" + id) as HTMLElement;
+    const edit = (id: string, value: string, event: string) => {
+      const field = control(id) as HTMLInputElement;
+      field.value = value;
+      field.dispatchEvent(new win.Event(event));
+    };
+    const waitFor = async (status: HTMLElement, state: string) => {
+      for (let i = 0; i < 80 && status.dataset.state !== state; i++) await Zotero.Promise.delay(25);
+      assert.equal(status.dataset.state, state, status.textContent || "");
+    };
+    try {
+      for (let i = 0; i < 100 && control("settings-root")?.dataset.initialized !== "true"; i++) {
+        await Zotero.Promise.delay(50);
+      }
+      Zotero.HTTP.request = (async (method: string, url: string, options: any) => {
+        requests.push({ method, url, options });
+        if (url.startsWith("https://open.bigmodel.cn/")) {
+          return { status: 200, response: { choices: [{ message: { content: "患者接受了治疗。" } }] } };
+        }
+        const response = options.headers.Authorization === "Bearer synthetic-mineru"
+          ? { code: 0, data: { batch_id: "test-batch", file_urls: ["https://cdn-mineru.openxlab.org.cn/test"] } }
+          : { code: "A0211" };
+        return { status: 200, response };
+      }) as typeof originalRequest;
+
+      const engine = control("engine") as HTMLSelectElement;
+      for (const id of ["cnki", "iciba", "mymemory"]) {
+        assert.include(Array.from(engine.options).find((option) => option.value === id)?.textContent, "不推荐");
+      }
+      assert.include(control("dictionary-note").textContent, "Cambridge Dictionary（不推荐）");
+      edit("engine", "glm47flash", "change");
+      assert.equal(control("service-fields").children.length, 1);
+      edit("service-field-secret", "synthetic-glm", "input");
+      control("test-service").click();
+      const status = control("engine-status");
+      await waitFor(status, "success");
+      assert.equal(engine.nextElementSibling, status);
+      assert.include(status.textContent, "连接成功");
+      assert.equal(status.style.backgroundColor, "rgb(220, 252, 231)");
+      assert.equal(requests[0].options.headers.Authorization, "Bearer synthetic-glm");
+      assert.equal(JSON.parse(requests[0].options.body).model, "glm-4.7-flash");
+
+      (control("pdf-troubleshooting") as HTMLDetailsElement).open = true;
+      edit("native-backend", "docling", "change");
+      assert.isFalse(control("docling-section").hidden);
+      edit("native-backend", "mineru", "change");
+      assert.isTrue(control("docling-section").hidden);
+      assert.equal(control("docling-section").getBoundingClientRect().height, 0);
+      assert.isFalse(control("cloud-mineru-section").hidden);
+      assert.include((control("mineru-link") as HTMLAnchorElement).href, "mineru.net/apiManage/");
+      edit("cloud-mineru-key", "synthetic-mineru", "input");
+      const mineruStatus = control("mineru-status");
+      assert.include(mineruStatus.textContent, "已自动保存");
+      control("test-mineru").click();
+      await waitFor(mineruStatus, "success");
+      edit("cloud-mineru-key", "expired-mineru", "input");
+      control("test-mineru").click();
+      await waitFor(mineruStatus, "error");
+      assert.include(mineruStatus.textContent, "已过期");
+      assert.deepEqual(requests.slice(1).map(({ method, url }) => [method, url]), [
+        ["POST", "https://mineru.net/api/v4/file-urls/batch"],
+        ["POST", "https://mineru.net/api/v4/file-urls/batch"],
+      ]);
+    } catch (error: any) {
+      assert.fail(`${String(error)}
+${error?.stack || ""}`);
+    } finally {
+      win.close();
+      Zotero.HTTP.request = originalRequest;
+      for (const [index, key] of keys.entries()) {
+        if (previous[index] === undefined) Zotero.Prefs.clear(prefix + key, true);
+        else Zotero.Prefs.set(prefix + key, previous[index], true);
+      }
     }
   });
 
@@ -611,6 +720,9 @@ describe("startup", function () {
 
   it("should render independent per-service input fields on selection", async function () {
     this.timeout(10000);
+    const prefix = "extensions.zotero.bilingualreader.";
+    const keys = ["engine", "services.gemini.secret", "services.gemini.revision"];
+    const previous = keys.map((key) => Zotero.Prefs.get(prefix + key, true));
     const win = Zotero.Utilities.Internal.openPreferences("bilingual-reader-preferences");
     assert.exists(win);
     try {
@@ -628,6 +740,9 @@ describe("startup", function () {
         "bilingualreader-service-field-endpoint",
       ) as HTMLInputElement;
       assert.equal(secret.type, "password");
+      secret.value = "synthetic-test-key";
+      secret.dispatchEvent(new win!.Event("input"));
+      assert.equal(getServiceSetting("gemini", "secret"), "synthetic-test-key");
       assert.include(endpoint.value, "generativelanguage.googleapis.com");
       selector.value = "libretranslate";
       selector.dispatchEvent(new win!.Event("change"));
@@ -637,6 +752,13 @@ describe("startup", function () {
         ) as HTMLInputElement).value,
         "http://127.0.0.1:5000",
       );
+      selector.value = "gemini";
+      selector.dispatchEvent(new win!.Event("change"));
+      const restored = win!.document.getElementById("bilingualreader-service-field-secret") as HTMLInputElement;
+      assert.equal(restored.value, "synthetic-test-key");
+      restored.value = "";
+      restored.dispatchEvent(new win!.Event("input"));
+      assert.equal(getServiceSetting("gemini", "secret"), "");
       selector.value = "youdao";
       selector.dispatchEvent(new win!.Event("change"));
       assert.equal(
@@ -645,6 +767,10 @@ describe("startup", function () {
       );
     } finally {
       win?.close();
+      for (const [index, key] of keys.entries()) {
+        if (previous[index] === undefined) Zotero.Prefs.clear(prefix + key, true);
+        else Zotero.Prefs.set(prefix + key, previous[index], true);
+      }
     }
   });
 
@@ -821,6 +947,11 @@ describe("startup", function () {
       assert.equal(translations.length, 1);
       assert.equal(translations[0].textContent, "第一页译文。");
       assert.equal(content.querySelector('[data-ref-path="1"]')?.nextElementSibling, null);
+      assert.equal(getTranslationPageCount(1), 1);
+      structure.catalog.pages.splice(1);
+      content.querySelector('[data-ref-path="1"]')?.remove();
+      await refreshBilingualReading(reader);
+      assert.equal(doc.querySelector(".bilingual-reader-translation")?.textContent, "第一页译文。");
     } finally {
       await toggleBilingualReading(reader);
       clearTranslationCache();

@@ -1,4 +1,5 @@
 import { assert } from "chai";
+import { setPDFLayout } from "../src/settings";
 import {
   reconcileReaderToolbars,
   registerReaderToolbar,
@@ -33,6 +34,7 @@ describe("reader toolbar recovery", function () {
 
   afterEach(function () {
     unregisterReaderToolbar();
+    Zotero.Prefs.clear("extensions.zotero.bilingualreader.pdf.layout", true);
     (Zotero.Reader as any)._readers = originalReaders;
   });
 
@@ -43,7 +45,7 @@ describe("reader toolbar recovery", function () {
   }
 
   function assertButtons(doc: Document, expected = 1) {
-    for (const name of ["toolbar", "refresh", "export", "native-pdf", "native-reading", "side-by-side"]) {
+    for (const name of ["toolbar", "refresh", "export"]) {
       assert.lengthOf(doc.querySelectorAll(`.bilingual-reader-${name}-button`), expected);
     }
   }
@@ -71,6 +73,23 @@ describe("reader toolbar recovery", function () {
       doc: reader._iframeWindow.document,
       append: () => assert.fail("Existing buttons must not be appended twice"),
     });
+  });
+
+  it("keeps the same three controls when the layout changes", function () {
+    const reader = makeReader();
+    readers.push(reader);
+    reconcileReaderToolbars();
+    assertButtons(reader._iframeWindow.document);
+
+    setPDFLayout("side-by-side");
+    reconcileReaderToolbars();
+    const doc = reader._iframeWindow.document;
+    for (const name of ["toolbar", "refresh", "export"]) {
+      assert.lengthOf(doc.querySelectorAll(`.bilingual-reader-${name}-button`), 1);
+    }
+    for (const name of ["native-pdf", "native-reading", "side-by-side"]) {
+      assert.notExists(doc.querySelector(`.bilingual-reader-${name}-button`));
+    }
   });
 
   it("keeps the fallback toolbar group horizontal and independent of Zotero section styles", function () {

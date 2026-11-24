@@ -1,5 +1,7 @@
 pref("engine", "google");
 pref("native.backend", "pdfjs");
+pref("pdf.layout", "stacked");
+pref("export.useOriginal", false);
 pref("native.doclingURL", "http://127.0.0.1:8786");
 pref("ollama.url", "http://127.0.0.1:11434");
 pref("ollama.model", "gpt-oss:20b");

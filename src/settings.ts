@@ -24,6 +24,8 @@ const MAX_BATCH_PARAGRAPHS_PREF = `${BASE}.maxBatchParagraphs`;
 const MAX_ERRORS_PREF = `${BASE}.maxConsecutiveErrors`;
 const REQUEST_TIMEOUT_PREF = `${BASE}.requestTimeoutMs`;
 const SKIP_LAST_PAGES_PREF = `${BASE}.skipLastPages`;
+const LAYOUT_PREF = `${BASE}.pdf.layout`;
+const ORIGINAL_EXPORT_PREF = `${BASE}.export.useOriginal`;
 
 function getStringPref(key: string, fallback: string): string {
   const value = (Zotero.Prefs as any).get(key, true);
@@ -127,6 +129,28 @@ export function getSkipLastPages(): number {
 
 export function setSkipLastPages(value: number): void {
   setNumberPref(SKIP_LAST_PAGES_PREF, value, 0, 50);
+}
+
+export function getTranslationPageCount(totalPages: number): number {
+  return Math.max(Math.min(1, totalPages), totalPages - getSkipLastPages());
+}
+
+export type PDFLayout = "stacked" | "side-by-side";
+
+export function getPDFLayout(): PDFLayout {
+  return Zotero.Prefs.get(LAYOUT_PREF, true) === "side-by-side" ? "side-by-side" : "stacked";
+}
+
+export function setPDFLayout(layout: PDFLayout): void {
+  Zotero.Prefs.set(LAYOUT_PREF, layout, true);
+}
+
+export function getUseOriginalPDFExport(): boolean {
+  return Zotero.Prefs.get(ORIGINAL_EXPORT_PREF, true) === true;
+}
+
+export function setUseOriginalPDFExport(enabled: boolean): void {
+  Zotero.Prefs.set(ORIGINAL_EXPORT_PREF, enabled, true);
 }
 
 export function getResolvedPDFTranslateService(): string {

@@ -89,6 +89,9 @@ export async function parseWithLocalDocling(
   if (enriched.pages.length !== fallback.pages.length) {
     throw new Error("Docling 返回页数与原始 PDF.js 不一致，已拒绝覆盖页面顺序。");
   }
+  if (!enriched.pages.some((page) => page.blocks.some((block) => block.text.trim()))) {
+    throw new Error("Docling 未返回可用的分页文本。");
+  }
   const pageMap = new Map(enriched.pages.map((page) => [page.index, page]));
   if (pageMap.size !== fallback.pages.length) throw new Error("Docling 页面编号不唯一。");
   return {

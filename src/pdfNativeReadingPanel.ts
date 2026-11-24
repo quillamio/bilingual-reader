@@ -10,14 +10,16 @@ import { parseWithCloudProvider } from "./pdfCloudParsers";
 import { readOriginalAttachment } from "./pdfVectorExport";
 import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "./pdfNativeDocling";
 import { translateNativeDocument } from "./pdfNativeExport";
-import { type NativeDocument } from "./pdfNativeModel";
+import { describePDFParser, PDF_PARSER_NAMES, type NativeDocument } from "./pdfNativeModel";
 
 interface PanelSession {
   host: HTMLElement;
   closed: boolean;
+  restoreViewer: () => void;
 }
 const panels = new WeakMap<object, PanelSession>();
 const PANEL_CLASS = "bilingual-reader-pdfjs-reading-panel";
+const PANEL_WIDTH = "min(40%, 560px)";
 
 function showPage(win: any, page: number): void {
   try {
@@ -33,8 +35,8 @@ function createPanel(doc: Document, onClose: () => void): {
   const host = doc.createElement("aside") as HTMLElement;
   host.className = PANEL_CLASS;
   host.style.cssText =
-    "position:fixed!important;right:0!important;top:58px!important;" +
-    "width:min(40vw,560px)!important;height:calc(100vh - 58px)!important;" +
+    "position:fixed!important;inset-inline-end:0!important;top:41px!important;" +
+    `width:${PANEL_WIDTH}!important;bottom:0!important;` +
     "z-index:2147483600!important;background:white!important;" +
     "border-left:1px solid #d5d5d5;box-shadow:-2px 0 15px #0002;" +
     "display:block!important;overflow:hidden!important;";
@@ -102,31 +104,41 @@ function paintParagraphs(
   }
   return destinations;
 }
-export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
+export async function togglePDFJSReadingPanel(reader: any, refresh = false): Promise<void> {
   if (!reader || typeof reader !== "object") return;
   const previous = panels.get(reader);
   if (previous) {
-    previous.closed = true;
-    previous.host.remove();
-    panels.delete(reader);
-    return;
+    cleanupNativeReadingPanel(reader);
+    if (!refresh) return;
   }
   const doc = reader?._iframeWindow?.document as Document | undefined;
   if (!doc?.body) return;
-  const session: PanelSession = { host: doc.createElement("aside"), closed: false };
-  const ui = createPanel(doc, () => { void togglePDFJSReadingPanel(reader); });
-  session.host = ui.host;
+  const ui = createPanel(doc, () => cleanupNativeReadingPanel(reader));
+  const viewer = doc.getElementById("split-view") as HTMLElement | null;
+  const inset = viewer?.style.insetInlineEnd || "";
+  const session: PanelSession = {
+    host: ui.host,
+    closed: false,
+    restoreViewer: () => { if (viewer) viewer.style.insetInlineEnd = inset; },
+  };
   panels.set(reader, session);
+  if (viewer) viewer.style.insetInlineEnd = PANEL_WIDTH;
   try {
+    const internal = reader._internalReader || reader;
+    const primary = internal._lastViewPrimary !== false || !internal._secondaryView;
+    if (primary ? internal._primarySDTView : internal._secondarySDTView) {
+      await internal._setReadingMode?.(primary, false);
+    }
+    if (session.closed) return;
     const handle = getNormalPDFProxy(reader);
     if (!handle) throw new Error("未检测到普通 PDF 页面的 PDF.js 实例，请切回普通页面视图。");
-    const original = await parseNormalPDFWithPDFJS(handle.pdf, (state) => {
+    const provider = getNativePDFBackend();
+    const original = await parseNormalPDFWithPDFJS(handle, (state) => {
       if (!session.closed) ui.status.textContent =
-        "PDF.js 解析：" + state.page + "/" + state.pages;
-    });
+        "读取 PDF.js 页面：" + state.page + "/" + state.pages;
+    }, () => session.closed);
     if (session.closed) return;
     let parsed = original;
-    const provider = getNativePDFBackend();
     const attachment = Zotero.Items.get(Number(reader.itemID || 0));
     if (provider !== "pdfjs") {
       if (isCloudParser(provider)) {
@@ -137,7 +149,7 @@ export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
         }
       }
       try {
-        ui.status.textContent = "正在解析：" + provider;
+        ui.status.textContent = "正在解析：" + PDF_PARSER_NAMES[provider];
         const bytes = await readOriginalAttachment(attachment);
         parsed = provider === "docling" ?
           await parseWithLocalDocling(bytes, getDoclingEndpoint(), original) :
@@ -153,11 +165,12 @@ export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
     }
     if (session.closed) return;
     const destination = paintParagraphs(doc, ui.body, parsed, handle.contentWindow);
-    ui.status.textContent = "正在翻译：" + parsed.pages.length + " 页";
+    const parserStatus = describePDFParser(parsed, provider);
+    ui.status.textContent = parserStatus + " · 正在翻译 " + parsed.pages.length + " 页";
     const result = await translateNativeDocument(
       parsed, Number(reader.itemID || 0), String(attachment?.key || reader.itemID || ""),
       (done, total) => {
-        if (!session.closed) ui.status.textContent = "翻译：" + done + "/" + total;
+        if (!session.closed) ui.status.textContent = parserStatus + " · 翻译 " + done + "/" + total;
       },
       () => session.closed,
     );
@@ -165,7 +178,7 @@ export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
     for (const [id, element] of destination) {
       element.textContent = result.get(id) || "〔未翻译 / 尾页已跳过〕";
     }
-    ui.status.textContent = "已完成 · " + parsed.source.toUpperCase() +
+    ui.status.textContent = "已完成 · " + parserStatus +
       " · " + result.size + " 段译文";
   } catch (error) {
     Zotero.logError(error as Error);
@@ -174,29 +187,11 @@ export async function togglePDFJSReadingPanel(reader: any): Promise<void> {
   }
 }
 
-const BUTTON_CLASS = "bilingual-reader-native-reading-button";
-export function renderNativeReadingToolbarButton(event: any): void {
-  const { reader, doc, append } = event || {};
-  if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
-  if (doc.querySelector("." + BUTTON_CLASS)) return;
-  const button = doc.createElement("button") as HTMLButtonElement;
-  button.type = "button";
-  button.className = "toolbar-button " + BUTTON_CLASS;
-  button.textContent = "📖";
-  button.title = "PDF.js 双语阅读面板（不用 Zotero 阅读模式）";
-  button.setAttribute("aria-label", button.title);
-  button.style.cssText = "min-width:34px;padding-inline:5px;font-size:18px;line-height:1";
-  button.addEventListener("click", (event: Event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void togglePDFJSReadingPanel(reader);
-  });
-  append(button);
-}
 export function cleanupNativeReadingPanel(reader: any): void {
   const session = panels.get(reader);
-  if (session) { session.closed = true; session.host.remove(); panels.delete(reader); }
-  try {
-    reader?._iframeWindow?.document?.querySelector("." + BUTTON_CLASS)?.remove();
-  } catch (_) { /* Reader closed */ }
+  if (!session) return;
+  session.closed = true;
+  session.host.remove();
+  session.restoreViewer();
+  panels.delete(reader);
 }

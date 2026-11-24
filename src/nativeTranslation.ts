@@ -111,7 +111,10 @@ async function memoryTranslate(text: string): Promise<string> {
 }
 
 async function gptTranslate(text: string, id: string): Promise<string> {
-  const url = setting(id, "endpoint");
+  const isGLM = id === "glm47flash";
+  const url = isGLM
+    ? "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    : setting(id, "endpoint");
   const isAzure = id === "azuregpt";
   const isResponses = /\/responses(?:\?|$)/.test(url);
   const prompt = promptFor(text, id);
@@ -119,7 +122,9 @@ async function gptTranslate(text: string, id: string): Promise<string> {
     { role: "system", content: prompt.system },
     { role: "user", content: prompt.user },
   ];
-  const payload: any = isResponses
+  const payload = isGLM
+    ? { model: "glm-4.7-flash", messages, stream: false, thinking: { type: "disabled" } }
+    : isResponses
     ? { model: setting(id, "model"), input: messages, stream: false }
     : { model: setting(id, "model"), messages, stream: false };
   const headers: Headers = isAzure
@@ -232,7 +237,7 @@ async function translateSingle(text: string, id: string): Promise<string> {
       return ensureText(res?.[0]?.translations?.[0]?.text, "Microsoft Translator");
     }
     case "openai": case "customgpt1": case "customgpt2": case "customgpt3":
-    case "azuregpt": return gptTranslate(text, id);
+    case "azuregpt": case "glm47flash": return gptTranslate(text, id);
     case "gemini": {
       const url = setting(id, "endpoint").replace(/:(streamGenerateContent|generateContent).*$/, ":generateContent");
       const addQuery = url.includes("?") ? "&" : "?";

@@ -13,7 +13,7 @@ interface PDFProxyHandle {
   pdf: any;
   contentWindow: any;
 }
-function findPDFProxyWindow(value: any): any {
+function unwrapPDFObject(value: any): any {
   try {
     return value?.wrappedJSObject || value || null;
   } catch (_) {
@@ -55,7 +55,7 @@ export function getNormalPDFProxy(reader: any): PDFProxyHandle | null {
   }
   const unique = new Set<any>();
   for (const candidate of possible) {
-    const win = findPDFProxyWindow(candidate);
+    const win = unwrapPDFObject(candidate);
     if (!win || unique.has(win)) continue;
     unique.add(win);
     try {
@@ -88,8 +88,9 @@ function cloneForWindow<T>(value: T, target: any): T {
   return value;
 }
 export async function parseNormalPDFWithPDFJS(
-  pdf: any,
+  { pdf }: PDFProxyHandle,
   onProgress?: (progress: NativePDFProgress) => void,
+  isCancelled?: () => boolean,
 ): Promise<NativeDocument> {
   if (!pdf?.getPage || !Number.isInteger(pdf.numPages) || pdf.numPages < 1) {
     throw new Error("无法访问原始 PDF.js 文档，请先打开普通 PDF 页面视图。");
@@ -97,19 +98,41 @@ export async function parseNormalPDFWithPDFJS(
   const pages = [];
   const warnings: string[] = [];
   for (let index = 0; index < pdf.numPages; index++) {
+    if (isCancelled?.()) break;
     onProgress?.({ page: index + 1, pages: pdf.numPages, stage: "parse" });
-    const page = await pdf.getPage(index + 1);
-    const viewport = page.getViewport({ scale: 1 });
-    const content = await page.getTextContent();
-    const native = extractPDFJSPage(
-      index, viewport.width, viewport.height,
-      (content?.items || []) as PDFJSTextItem[],
-    );
-    if (!native.blocks.length) {
-      warnings.push("第 " + (index + 1) + " 页未提取到可翻译文本（扫描 PDF 可能需要 OCR）。");
+    // Awaiting a PDF.js promise from the add-on scope can wrap its page in an
+    // Xray that hides custom prototype methods. Use the page's viewer scope.
+    let stage = "获取页面";
+    let page: any;
+    try {
+      page = unwrapPDFObject(await pdf.getPage(index + 1));
+      if (isCancelled?.()) break;
+      stage = "读取页面尺寸";
+      const viewport = unwrapPDFObject(page.getViewport({ scale: 1 }));
+      stage = "提取文字";
+      const content = unwrapPDFObject(await page.getTextContent());
+      stage = "整理文字坐标";
+      const items: PDFJSTextItem[] = [];
+      const source = content?.items;
+      for (let i = 0; i < (source?.length || 0); i++) {
+        const item = source[i];
+        const t = item?.transform;
+        if (typeof item?.str !== "string" || !t || t.length < 6) continue;
+        items.push({
+          str: item.str, width: item.width, height: item.height, hasEOL: item.hasEOL,
+          transform: [t[0], t[1], t[2], t[3], t[4], t[5]],
+        });
+      }
+      const native = extractPDFJSPage(index, viewport.width, viewport.height, items);
+      if (!native.blocks.length) {
+        warnings.push("第 " + (index + 1) + " 页未提取到可翻译文本（扫描 PDF 可能需要 OCR）。");
+      }
+      pages.push(native);
+    } catch (error) {
+      throw new Error(`第 ${index + 1} 页${stage}失败：${String(error)}`);
+    } finally {
+      page?.cleanup?.();
     }
-    pages.push(native);
-    page.cleanup?.();
   }
   return { source: "pdfjs", pages, warnings };
 }
@@ -120,7 +143,7 @@ export async function snapshotPDFPage(
   contentWindow: any,
   scale = 1.25,
 ): Promise<string> {
-  const page = await pdf.getPage(pageIndex + 1);
+  const page = unwrapPDFObject(await pdf.getPage(pageIndex + 1));
   const viewport = page.getViewport(cloneForWindow({ scale }, contentWindow));
   // Keep canvas and PDF.js rendering context in the viewer's compartment
   // when possible. Firefox's Xray wrappers may reject a canvas context that

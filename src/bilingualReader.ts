@@ -3,6 +3,7 @@ import {
   DEFAULT_OLLAMA_URL,
   getCacheEngineTag,
   getEngine,
+  getPDFLayout,
   getMaxBatchParagraphs,
   getMaxCharsPerRequest,
   getMaxConcurrent,
@@ -11,7 +12,7 @@ import {
   getOllamaURL,
   getRequestGapMs,
   getRequestTimeoutMs,
-  getSkipLastPages,
+  getTranslationPageCount,
   setEngine,
   setOllamaModel,
   setOllamaURL,
@@ -98,8 +99,6 @@ async function raceWithTimeoutAndCancellation<T>(
   timeoutMs: number,
   cancellation: CancellationToken,
 ): Promise<T> {
-  if (cancellation.cancelled) throw new RunCancelledError();
-
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     let removeCancelListener: () => void = () => undefined;
@@ -158,7 +157,7 @@ async function translateWithPDFTranslate(
   const pdfTranslate = (Zotero as any).PDFTranslate;
   if (!pdfTranslate?.api?.translate) {
     throw new Error(
-      "未检测到 Translate for Zotero。请先安装并启用 zotero-pdf-translate，或在设置中切换为 Ollama。",
+      "未检测到 Translate for Zotero。请先安装并启用 zotero-pdf-translate，或在设置中切换为内置翻译引擎。",
     );
   }
 
@@ -377,7 +376,7 @@ async function ensureReadingMode(reader: any): Promise<Document> {
   if (typeof internal._setReadingMode === "function") {
     await internal._setReadingMode(primary, true);
   } else {
-    throw new Error("当前 Zotero 版本未提供可用的阅读模式接口。请先手动开启“阅读模式”后重试。");
+    throw new Error("当前 Zotero 版本未提供可用的阅读模式接口。请开启“阅读模式”后重试。");
   }
 
   for (let i = 0; i < 150; i++) {
@@ -473,13 +472,6 @@ function getPageIndexForRef(structure: any, refPath: string): number | undefined
   return undefined;
 }
 
-function shouldSkipByPage(pageIndex: number | undefined, totalPages: number): boolean {
-  const skipLastPages = getSkipLastPages();
-  if (!skipLastPages || pageIndex === undefined || totalPages <= 0) return false;
-  const firstSkippedPage = Math.max(0, totalPages - skipLastPages);
-  return pageIndex >= firstSkippedPage;
-}
-
 function collectParagraphs(
   doc: Document,
   itemKey: string,
@@ -500,6 +492,7 @@ function collectParagraphs(
   ].join(",");
 
   const totalPages = Array.isArray(structure?.catalog?.pages) ? structure.catalog.pages.length : 0;
+  const cutoff = getTranslationPageCount(totalPages);
   const elements = Array.from(doc.querySelectorAll(selector)) as HTMLElement[];
   const paragraphs: ReaderParagraph[] = [];
 
@@ -511,7 +504,7 @@ function collectParagraphs(
 
     const refPath = element.dataset.refPath || "";
     const pageIndex = getPageIndexForRef(structure, refPath);
-    if (shouldSkipByPage(pageIndex, totalPages)) continue;
+    if (pageIndex !== undefined && pageIndex >= cutoff) continue;
 
     paragraphs.push({
       refPath,
@@ -580,8 +573,11 @@ function clearTranslations(doc: Document): void {
 
 function showError(reader: any, message: string): void {
   try {
-    reader?._iframeWindow?.alert?.(message);
-    return;
+    const win = reader?._iframeWindow;
+    if (typeof win?.alert === "function") {
+      win.alert(message);
+      return;
+    }
   } catch (_) {
     // Fall through to the Zotero main window.
   }
@@ -645,10 +641,7 @@ async function translateParagraphs(
       (viewportDistances.get(b) ?? Number.MAX_SAFE_INTEGER),
   );
 
-  if (!pendingIndexes.length) {
-    finishRun(reader, generation);
-    return;
-  }
+  if (!pendingIndexes.length) return;
 
   const cancellation = getRunCancellation(reader, generation);
   const jobItems: TranslationJobItem[] = pendingIndexes.map((paragraphIndex) => ({
@@ -758,7 +751,7 @@ async function translateParagraphs(
         if (isCancellationError(error)) return;
         if (isDeadObjectError(error)) {
           aborted = true;
-          cancelRun(reader);
+          cancellation.cancel();
           return;
         }
         if (!isCurrentRun(reader, generation, doc)) return;
@@ -775,7 +768,7 @@ async function translateParagraphs(
         if (failureStreak >= maxErrors) {
           aborted = true;
           markUnfinishedPaused(doc, paragraphs);
-          cancelRun(reader);
+          cancellation.cancel();
           return;
         }
       }
@@ -783,97 +776,81 @@ async function translateParagraphs(
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker()));
-
-  finishRun(reader, generation);
 }
 
 async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
-  const doc = await ensureReadingMode(reader);
-  const root = getDocumentRoot(doc);
-  if (!root) throw new Error("无法访问 Zotero 阅读模式页面。");
-
-  installStyles(doc);
-  cancelRun(reader);
-
-  if (refresh) {
-    clearTranslations(doc);
-  }
-
-  const itemID = Number(reader?.itemID || 0);
-  const item = itemID ? Zotero.Items.get(itemID) : null;
-  const itemKey = String(item?.key || reader?.itemKey || itemID || "reader");
-  if (!itemID) throw new Error("无法取得当前 PDF 的 Zotero 条目编号。");
-
-  try {
-    await (Zotero as any).SDT?.ensure?.(itemID, { isPriority: true });
-  } catch (error) {
-    Zotero.logError(error as Error);
-  }
-
-  const engine = getEngine();
-  if (isManagedService(engine)) assertServiceConfigured(engine);
-  const engineTag = getCacheEngineTag(undefined, engine);
-  const structure = getSDTStructure(reader);
-  const paragraphs = collectParagraphs(doc, itemKey, engineTag, structure);
-  if (!paragraphs.length) {
-    throw new Error("当前阅读模式中没有检测到可翻译的正文段落，或已被末尾页数设置全部排除。");
-  }
-
-  observeReadingLayout(getActiveSDTView(reader), doc);
-  for (const paragraph of paragraphs) {
-    ensureTranslationBlock(doc, paragraph);
-  }
-
   const generation = nextGeneration(reader);
-  root.dataset.bilingualReaderRunning = "true";
+  let root: HTMLElement | null = null;
   try {
-    await translateParagraphs(
-      reader,
-      doc,
-      itemID,
-      itemKey,
-      paragraphs,
-      generation,
-      engine,
-      engineTag,
-    );
+    const doc = await ensureReadingMode(reader);
+    if (!isCurrentRun(reader, generation, doc)) return;
+
+    root = getDocumentRoot(doc);
+    if (!root) throw new Error("无法访问 Zotero 阅读模式页面。");
+    if (refresh) clearTranslations(doc);
+
+    const itemID = Number(reader?.itemID || 0);
+    const item = itemID ? Zotero.Items.get(itemID) : null;
+    const itemKey = String(item?.key || reader?.itemKey || itemID || "reader");
+    if (!itemID) throw new Error("无法取得当前 PDF 的 Zotero 条目编号。");
+
+    try {
+      await (Zotero as any).SDT?.ensure?.(itemID, { isPriority: true });
+    } catch (error) {
+      Zotero.logError(error as Error);
+    }
+    if (!isCurrentRun(reader, generation, doc)) return;
+
+    const engine = getEngine();
+    if (isManagedService(engine)) assertServiceConfigured(engine);
+    const engineTag = getCacheEngineTag(undefined, engine);
+    const paragraphs = collectParagraphs(doc, itemKey, engineTag, getSDTStructure(reader));
+    if (!paragraphs.length) {
+      throw new Error("当前阅读模式中没有检测到可翻译的正文段落。");
+    }
+
+    installStyles(doc);
+    observeReadingLayout(getActiveSDTView(reader), doc);
+    for (const paragraph of paragraphs) {
+      ensureTranslationBlock(doc, paragraph);
+    }
+
+    root.dataset.bilingualReaderRunning = "true";
+    await translateParagraphs(reader, doc, itemID, itemKey, paragraphs, generation, engine, engineTag);
+  } catch (error: any) {
+    if (runStates.get(reader)?.generation === generation &&
+        !isDeadObjectError(error) && !isCancellationError(error)) {
+      showError(reader, error?.message || String(error));
+    }
   } finally {
+    if (runStates.get(reader)?.generation === generation) {
+      finishRun(reader, generation);
+      try {
+        if (root) delete root.dataset.bilingualReaderRunning;
+      } catch (_) {
+        // Zotero can destroy the reading document while a request is pending.
+      }
+    }
     flushTranslationCacheIndex();
-    const liveRoot = getDocumentRoot(getSDTDocument(reader) || doc);
-    if (liveRoot) delete liveRoot.dataset.bilingualReaderRunning;
   }
 }
 
 export async function toggleBilingualReading(reader: any): Promise<void> {
   try {
-    const doc = await ensureReadingMode(reader);
-
-    if (doc.querySelector(`.${TRANSLATION_CLASS}`)) {
+    const doc = getSDTDocument(reader);
+    if (runStates.get(reader)?.running || doc?.querySelector(`.${TRANSLATION_CLASS}`)) {
       cancelRun(reader);
-      clearTranslations(doc);
+      if (doc) clearTranslations(doc);
       return;
     }
-
     await prepareAndRun(reader, false);
-  } catch (error: any) {
-    if (!isDeadObjectError(error) && !isCancellationError(error)) {
-      showError(reader, error?.message || String(error));
-    }
+  } catch (error) {
+    if (!isDeadObjectError(error)) showError(reader, String(error));
   }
 }
 
 export async function refreshBilingualReading(reader: any): Promise<void> {
-  try {
-    cancelRun(reader);
-    const doc = await ensureReadingMode(reader);
-    clearTranslations(doc);
-    await Zotero.Promise.delay(30);
-    await prepareAndRun(reader, false);
-  } catch (error: any) {
-    if (!isDeadObjectError(error) && !isCancellationError(error)) {
-      showError(reader, error?.message || String(error));
-    }
-  }
+  await prepareAndRun(reader, true);
 }
 
 function getPromptWindow(reader: any): any {
@@ -964,6 +941,17 @@ function createToolbarButton(
   return button;
 }
 
+async function useSelectedReadingLayout(reader: any, refresh: boolean): Promise<void> {
+  const { togglePDFJSReadingPanel, cleanupNativeReadingPanel } = await import("./pdfNativeReadingPanel");
+  if (getPDFLayout() === "side-by-side") {
+    await togglePDFJSReadingPanel(reader, refresh);
+    return;
+  }
+  cleanupNativeReadingPanel(reader);
+  if (refresh) await refreshBilingualReading(reader);
+  else await toggleBilingualReading(reader);
+}
+
 export function renderBilingualToolbarButtons(event: any): void {
   const { reader, doc, append } = event || {};
   if (!reader || reader.type !== "pdf" || !doc || typeof append !== "function") return;
@@ -974,8 +962,8 @@ export function renderBilingualToolbarButtons(event: any): void {
         doc,
         TOOLBAR_BUTTON_CLASS,
         MAHJONG_EMOJI,
-        "开启/关闭中英段落对照",
-        () => void toggleBilingualReading(reader),
+        "开启或关闭所选双语对照方式",
+        () => void useSelectedReadingLayout(reader, false),
       ),
     );
   }
@@ -987,7 +975,7 @@ export function renderBilingualToolbarButtons(event: any): void {
         REFRESH_BUTTON_CLASS,
         "🔄",
         "取消当前任务、清除错误结果，并按当前设置重新翻译",
-        () => void refreshBilingualReading(reader),
+        () => void useSelectedReadingLayout(reader, true),
       ),
     );
   }

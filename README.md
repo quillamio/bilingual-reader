@@ -13,8 +13,8 @@
 ## 主要功能
 
 - 🀄 一键开启 / 关闭 Zotero 原有阅读模式的段落中英对照。
-- 📖 **PDF.js 原生双语阅读面板**：普通 PDF 页面视图下直接提取文本翻译，保留原始页面图片，不依赖 Zotero SDT 阅读模式。
-- 📑 **PDF.js 原版保真双语导出**：直接复制原始 PDF 页面（保留原图、矢量和文字层），后附可搜索的英中对照页；支持 PDF.js、Docling、MinerU、Mistral OCR 和 LlamaParse 五种解析器。
+- **左右双语阅读面板**：普通 PDF 页面视图下直接提取文本翻译，保留原始页面图片，不依赖 Zotero SDT 阅读模式。
+- **PDF.js 原版保真双语导出**：直接复制原始 PDF 页面（保留原图、矢量和文字层），后附可搜索的英中对照页；支持 PDF.js、Docling、MinerU、Mistral OCR 和 LlamaParse 五种解析器。
 - 默认内置 **Google 翻译（免 API Key）**；独立段落翻译引擎，另有 Ollama 与 Translate for Zotero 兼容模式。
 - 可选 **Ollama** 本地或云端模型。
 - 自动缓存已完成译文。
@@ -72,7 +72,7 @@
 
 ## PDF 解析与导出（预览版）
 
-Zotero 设置 → 中英对照 → 原始 PDF 解析，选择解析引擎。PDF.js 默认，不要求云端密钥。Docling 需本机运行 Python 服务（见 docs/native-pdfjs-docling.md）。
+在 Zotero 设置 → 中英对照选择上下对照或左右对照。🀄 按所选方式阅读，🖨️ 按同一方式导出。原版保真模式和解析引擎收在「如果导出遇到问题再进行以下设置」下。PDF.js 默认，不要求云端密钥。Docling 需本机运行 Python 服务（见 docs/native-pdfjs-docling.md）。
 
 | 解析器 | 配置 | 申请/API 文档 |
 | --- | --- | --- |
@@ -84,11 +84,13 @@ Zotero 设置 → 中英对照 → 原始 PDF 解析，选择解析引擎。PDF.
 
 各 API Key 独立保存在 Zotero 本地偏好中（非系统钥匙串），可清空。云服务每次上传原始 PDF 前需用户确认；可能计费，敏感未发表资料建议本地解析。初版云解析限制 30 MB；MinerU 使用 v4 批量上传与任务轮询，Mistral 返回每页 OCR Markdown，LlamaParse 使用 v2 文件解析任务。解析错误可显式回退本地 PDF.js；尚未使用真实付费账户完成全部端到端验证。PDF 解析和文字翻译是不同服务，需分别配置。
 
-**📑 原版保真双语导出**：先打印按原始页码组织的可搜索双语译文，再使用 pdf-lib 直接复制原始 PDF 页面并合并。成品前部是完整原始 PDF，后部是双语译文；不再将原始页转成 JPEG。保留原页尺寸、旋转、内容流、字体和嵌入图片；新文件不保证保留原文档级签名、书签、表单和跨页链接。原始附件不变。
+**原版保真双语导出**：先打印按原始页码组织的可搜索双语译文，再使用 pdf-lib 直接复制原始 PDF 页面并合并。成品前部是完整原始 PDF，后部是双语译文；不再将原始页转成 JPEG。保留原页尺寸、旋转、内容流、字体和嵌入图片；新文件不保证保留原文档级签名、书签、表单和跨页链接。原始附件不变。
 
-**◫ 左右对照 PDF**：打开普通 PDF 页面，点击工具栏 ◫。左侧保留原始 PDF 的矢量页面（含可见图表），右侧显示对应原页的中文重排译文。每个原页独立分页；长译文自动续页并重复左侧原页，避免裁切。未翻译段落显式标记并保留原文；跳过尾页设置仍然有效。输出为一个宽版 PDF 附件，可在 Zotero 中再次打开。该模式不是原位覆盖翻译，右侧不会复刻原文图表布局，批注/链接/签名等交互对象不保证保留。无需安装 PDF2zh 或 Python（选 Docling 才需要本地服务）。
+**左右对照 PDF**：启动 [Zotero PDF2zh 的本机服务](https://github.com/guaguastandup/zotero-pdf2zh)，在设置中选「左右对照」并测试连接，再点击 🖨️。插件调用上游 `/translate` 接口，使用 PDF2zh Next 的 `LR` 双栏输出，直接把生成的 PDF 导入为 Zotero 附件。每张纸左侧是原文，右侧是保留页面版式的译文。默认连接 `http://127.0.0.1:8890`，优先读取原 Zotero PDF2zh 的本机服务地址和翻译后端。翻译后端由该服务提供，无需把本插件的 API Key 发送给本机服务。
 
-**🖨️ 旧版逐段重排导出**：清理读者视口的固定高度、裁切与位置样式，统一 A4 边距，等待 HTML 完全加载才打印。默认附加完整原始 PDF 作为附录；如果检测到漏图，继续导出时必须保留原始 PDF 附录。附录并非将缺失 Figure 插入其正文中的正确位置。若希望减小文件，可在设置中关闭默认附录（检测到疑似漏图时仍会提示附录）。
+**解析器适用范围**：默认上下阅读和重排导出使用 Zotero 阅读模式（SDT）。设置里的 PDF.js、Docling、MinerU、Mistral OCR、LlamaParse 用于左右阅读面板与原版保真导出。左右 PDF 导出用 PDF2zh Next/BabelDOC 自身解析和重新排版。使用外部解析器的工作流会显示实际解析来源，以及由 PDF.js 补位的页数。
+
+**🖨️ 旧版逐段重排导出**：清理读者视口的固定高度、裁切与位置样式，统一 A4 边距，等待 HTML 完全加载才打印。导出会主动渲染尚未滚动到的 Zotero 原始 PDF 图表区域，并将图片直接嵌入双语正文。
 
 PDF 合并后重新读取校验总页数，导入 Zotero 为新附件；不覆盖原文件。CI 包含真实打印样本的独立渲染检查。
 
@@ -143,5 +145,6 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 - [Easydict](https://github.com/tisfeng/Easydict)（GPL-3.0）：参考多服务独立配置及开箱即用的体验；本次未复制代码。
 - [Translate for Zotero](https://github.com/windingwind/zotero-pdf-translate)（AGPL-3.0）：此前内置引擎分支包含参考及改编的服务适配器，保留相应源码署名和许可证。
 - [ReadIN 译读](https://github.com/phoenix8701-ctrl/readin-yidu)（AGPL-3.0）：参考整页双语阅读及回存 Zotero 的交互；本次未复制代码。
-- [Zotero PDF2zh](https://github.com/guaguastandup/zotero-pdf2zh)（AGPL-3.0）：参考 PDF 左右对照和附件导出设计；本次未复制其代码或调用其服务。
+- [Zotero PDF2zh（guaguastandup 及贡献者）](https://github.com/guaguastandup/zotero-pdf2zh)（AGPL-3.0）：左右 PDF 导出直接调用上游的本机服务协议（提交、轮询及下载），导入其原生 `LR` 双栏文件。
+- [PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next) 与 [BabelDOC](https://github.com/funstory-ai/BabelDOC)：由 Zotero PDF2zh 服务调用，用于 PDF 原位排版翻译和同页左右双栏输出。
 - [pdf-lib](https://github.com/Hopding/pdf-lib)（MIT）：实际打包依赖，用于原页复制与合并；相关第三方许可证见 addon/content/licenses/pdf-export-dependencies.txt。

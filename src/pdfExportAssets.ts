@@ -6,8 +6,8 @@
  * canvas.cloneNode() deliberately does NOT copy the canvas bitmap.
  * Embed assets as data: URLs, without mutating Zotero's live reader.
  *
- * Missing Figure blocks in Zotero's SDT structure cannot be reconstructed
- * by this module; a separate source-PDF image/figure extraction path is needed.
+ * Zotero renders source-PDF figure crops only as they approach the viewport.
+ * Prepare those crops before taking the export snapshot.
  */
 export interface ExportAssetReport {
   imageElements: number;
@@ -23,6 +23,39 @@ const MAX_TOTAL_IMAGE_BYTES = 96 * 1024 * 1024;
 
 function exportElements<T extends Element>(root: HTMLElement, selector: string): T[] {
   return Array.from(root.querySelectorAll(selector)) as T[];
+}
+
+/** Ask the native SDT view to render offscreen source crops before cloning. */
+export async function preparePDFExportFigures(view: any, root: HTMLElement): Promise<void> {
+  if (typeof view?._loadSourceCrop !== "function") return;
+  const pending = exportElements<HTMLElement>(
+    root, 'figure.sdt-source-crop[data-source-crop-state="ready"], ' +
+      'figure.sdt-source-crop[data-source-crop-state="loading"]',
+  );
+  for (const figure of pending) {
+    let expired = false;
+    const render = async () => {
+      if (figure.dataset.sourceCropState === "ready") await view._loadSourceCrop(figure);
+      // The reader can start a lazy crop between selection and this call.
+      while (!expired && figure.dataset.sourceCropState === "loading" && figure.isConnected) {
+        await Zotero.Promise.delay(50);
+      }
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        render(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("原始 PDF 图表提取超时。")), 20000);
+        }),
+      ]);
+    } catch (error) {
+      Zotero.logError(error as Error);
+    } finally {
+      expired = true;
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 }
 
 function normalizeSrc(image: HTMLImageElement): string {
