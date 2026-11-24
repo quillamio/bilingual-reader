@@ -68,7 +68,8 @@ for page in paired:
             if not page.rect.contains(rect) or rect.x0 <= midpoint:
                 raise AssertionError(f"Right-panel text misplaced: {marker} {rect}")
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect, alpha=False)
-            if sum(max(pix.samples[j:j+3]) < 160 for j in range(0, len(pix.samples), pix.n)) < 8:
+            samples = pix.samples
+            if sum(max(samples[j:j+3]) < 160 for j in range(0, len(samples), pix.n)) < 8:
                 raise AssertionError(f"Blank/clipped right marker: {marker}")
             seen.append(marker)
         elif marker in ("BRORIGINAL", "BRROTATED"):
@@ -77,8 +78,9 @@ for page in paired:
             left_original += marker == "BRORIGINAL"
             left_rotated += marker == "BRROTATED"
     pix = page.get_pixmap(clip=fitz.Rect(0, 0, midpoint, page.rect.height), alpha=False)
-    for j in range(0, len(pix.samples), pix.n):
-        r, g, b = pix.samples[j:j+3]
+    samples = pix.samples
+    for j in range(0, len(samples), pix.n):
+        r, g, b = samples[j:j+3]
         blue += b > 160 and r < 90 and g < 90
         red += r > 160 and g < 90 and b < 90
 if set(seen) != wanted or len(seen) != len(wanted):
