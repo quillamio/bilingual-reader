@@ -15,7 +15,7 @@ import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
 import { parseWithCloudProvider } from "./pdfCloudParsers";
 import { composeSideBySidePDF, readOriginalAttachment, readPDFFile, writePDFFile } from "./pdfVectorExport";
 import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
-import { describePDFParser, PDF_PARSER_NAMES, type NativeDocument, type NativeBlock } from "./pdfNativeModel";
+import { describePDFParser, PDF_PARSER_NAMES, withoutBibliography, type NativeDocument, type NativeBlock } from "./pdfNativeModel";
 import { buildNativeBilingualHTML, buildTranslatedPageHTML, type NativeExportPage } from "./pdfNativeHtml";
 import { buildInPlacePageHTML, type PositionedPDFPage } from "./pdfInPlaceLayout";
 import { isBodyText, joinPDFLines, normalizedSource, uncoveredBlocks } from "./pdfCoverage";
@@ -78,7 +78,8 @@ export async function translateNativeDocument(
   const cutoff = getTranslationPageCount(document.pages.length);
   const pending: Array<NativeBlock & BatchInput> = [];
   const translated = new Map<string, string>();
-  for (const page of document.pages) {
+  const sourcePages = getTranslateAllPages() ? document.pages : withoutBibliography(document.pages);
+  for (const page of sourcePages) {
     if (page.index >= cutoff) continue;
     for (const block of page.blocks) {
       if (!canTranslate(block)) continue;
@@ -151,14 +152,14 @@ export async function supplementReadingPDFPages(
     }
   }
   const reused = new Map<string, string>();
-  const targets = physical.pages.map(source => {
+  const sourcePages = allPages ? physical.pages : withoutBibliography(physical.pages);
+  const targets = sourcePages.map(source => {
     const reading = pages[source.index];
     const blocks: NativeBlock[] = [];
     if (source.index >= cutoff) return { ...source, blocks };
     for (const block of source.blocks) {
       if (!block.lineRects?.length ||
-          (block.type !== "heading" && block.type !== "caption" && !isBodyText(block, source.width)) ||
-          (!allPages && /^(references|bibliography|参考文献)$/iu.test(block.text.trim()))) continue;
+          (block.type !== "heading" && block.type !== "caption" && !isBodyText(block, source.width))) continue;
       const fragments = allPages ? [block] : uncoveredBlocks(block, reading?.excludedRects || []);
       for (const fragment of fragments) {
         const text = fragment.lineTexts ? joinPDFLines(fragment.lineTexts) : normalizedSource(fragment.text);
@@ -357,6 +358,7 @@ export async function exportNativePDFBilingual(
         }),
       };
     }
+    if (!getTranslateAllPages()) parsed = { ...parsed, pages: withoutBibliography(parsed.pages) };
     const translated = fallbackReading?.translations ?? await translateNativeDocument(
       parsed, itemID, String(attachment.key || itemID),
       (done, total) => progress(button, parserStatus + " · 翻译 " + done + "/" + total),

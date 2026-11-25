@@ -85,9 +85,9 @@ for page in paired:
         red += r > 160 and g < 90 and b < 90
 if set(seen) != wanted or len(seen) != len(wanted):
     raise AssertionError(f"Missing or duplicate right-panel markers: {wanted-set(seen)}")
-if left_original < 2 or left_rotated != 1 or min(blue, red) < 100:
+if left_original != 1 or left_rotated != 1 or min(blue, red) < 100:
     raise AssertionError(f"Missing left artwork, rotation, or continuation: {left_original}, {left_rotated}, {blue}, {red}")
-print(f"PASS: {len(paired)} paired pages, {len(seen)} right-side visible markers, repeated original={left_original}, rotated={left_rotated}.")
+print(f"PASS: {len(paired)} paired pages, {len(seen)} right-side visible markers, original={left_original}, rotated={left_rotated}.")
 
 # The toolbar fixture replaces both columns on a single original page.
 with fitz.open(path.with_name("side-by-side-export.pdf")) as positioned:

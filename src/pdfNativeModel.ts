@@ -91,10 +91,15 @@ function combineRect(a: NativeRect, b: NativeRect): NativeRect {
     top: Math.max(a.top, b.top),
   };
 }
+function isBibliographyHeading(text: string): boolean {
+  return /^(?:\d+(?:\.\d+)*[. ]+)?(?:references|bibliography|literature cited|参考文献)[.:：]?$/iu.test(text.trim());
+}
+
 function labelBlock(text: string, bold = false): NativeBlockType {
   if (/^(?:extended data )?(?:fig(?:ure)?\.?|图)\s*[\dIVX]/iu.test(text)) return "caption";
   if (/^table\s*[\dIVX]|^表\s*\d/iu.test(text)) return "caption";
   if (/^\d+(?:\.\d+){0,3}\s+[A-Z]/u.test(text) && text.length < 110) return "heading";
+  if (isBibliographyHeading(text)) return "heading";
   if (bold && text.length <= 145 && !/[.!?;]$/u.test(text) &&
       (/^\S+(?:\s+\S+){2,}/u.test(text) ||
        /^(?:abstract|introduction|results|discussion|methods|conclusions?|references)$/iu.test(text))) return "heading";
@@ -233,11 +238,15 @@ export function extractPDFJSPage(
         next && Math.abs(next.x1 - prev.x1) < 4 && line.y - next.y < typicalHeight * 1.7;
       const sameColumn = (prev.x1 + prev.x2 < width) === (line.x1 + line.x2 < width);
       const lineHeight = Math.max(typicalHeight, Math.min(prev.height, line.height));
+      const lead = current[0];
+      const continuesTitle = kind === "heading" && lead.height >= typicalHeight * 1.45 &&
+        lineType !== "caption" && gap > 0 && gap <= lineHeight * 1.6 &&
+        Math.abs(lead.x1 - line.x1) <= 3 && Math.abs(lead.height - line.height) <= 1.5;
       const paragraphBreak = gap < -3 || gap > lineHeight * 1.85 ||
         horizontalJump || (indent && kind !== "caption") || !sameColumn ||
         lineType !== "paragraph" || kind === "heading" ||
-        (kind === "caption" && Math.abs(current[0].height - line.height) > 1.5);
-      if (paragraphBreak) flush();
+        (kind === "caption" && Math.abs(lead.height - line.height) > 1.5);
+      if (paragraphBreak && !continuesTitle) flush();
     }
     if (!current.length) kind = lineType;
     current.push(line);
@@ -260,6 +269,25 @@ export function extractPDFJSPage(
   }
   return { index, width, height, blocks };
 }
+/** Preserve the native reading default when only PDF or OCR blocks are available. */
+export function withoutBibliography(pages: NativePage[]): NativePage[] {
+  let inBibliography = false;
+  return pages.map(page => ({
+    ...page,
+    blocks: page.blocks.filter(block => {
+      const title = block.text.normalize("NFKC").replace(/\s+/gu, " ").trim();
+      if (isBibliographyHeading(title)) {
+        inBibliography = true;
+        return false;
+      }
+      if (inBibliography && /^(?:supplementary (?:information|material|data)|appendix(?: [A-Z0-9]+)?|acknowledg(?:e)?ments?|author contributions|data availability(?: statement)?|funding|conflict of interest)[.:：]?$/iu.test(title)) {
+        inBibliography = false;
+      }
+      return !inBibliography;
+    }),
+  }));
+}
+
 export function validateNativeDocument(input: unknown, source: "pdfjs" | "docling"): NativeDocument {
   const data = input as any;
   if (!Array.isArray(data?.pages) || data.pages.length > 10000 ||

@@ -514,7 +514,7 @@ describe("native Zotero reading-mode highlight layout", function () {
     }
   });
 
-  nativeTest("keeps a translation on a continuation sheet when no safe text box exists", async () => {
+  nativeTest("pairs unpositioned translations with the original without repeating the original", async () => {
     const before = parent.getAttachments();
     const note = await saveSideBySidePDF(reader, attachment, [{
       pageIndex: 0,
@@ -524,7 +524,7 @@ describe("native Zotero reading-mode highlight layout", function () {
     const [id] = parent.getAttachments().filter(id => !before.includes(id));
     const file = Zotero.File.pathToFile((await Zotero.Items.get(id).getFilePathAsync()) as string);
     const pdf = await PDFDocument.load(await readPDFFile(file));
-    assert.equal(pdf.getPageCount(), 2);
+    assert.equal(pdf.getPageCount(), 1);
     const env = Components.classes["@mozilla.org/process/environment;1"]
       .getService(Components.interfaces.nsIEnvironment);
     const dir = env.get("BR_PDF_REGRESSION_DIR");

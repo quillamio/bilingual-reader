@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   pdfjsTextToLines, orderPDFJSLines, extractPDFJSPage,
-  validateNativeDocument,
+  validateNativeDocument, withoutBibliography,
 } from "../src/pdfNativeModel.ts";
 import { uncoveredBlocks } from "../src/pdfCoverage.ts";
 import { buildNativeBilingualHTML } from "../src/pdfNativeHtml.ts";
@@ -46,6 +46,21 @@ test("PDF.js separates an unnumbered bold title and keeps a multiline figure leg
   assert.equal(page.blocks[1].type, "paragraph");
   assert.equal(page.blocks[2].type, "caption");
   assert.equal(page.blocks[2].lineRects.length, 3);
+});
+test("PDF.js keeps a large wrapped title together including its short final line", () => {
+  const title = [
+    "Data-driven cluster analysis identifies distinct",
+    "types of cardiovascular-kidney-metabolic",
+    "syndrome",
+  ];
+  const page = extractPDFJSPage(0, 595, 790, [
+    ...title.map((text, i) => ({ ...item(text, 42, 680 - i * 28, [495, 455, 110][i]), height: 23, bold: true })),
+    ...Array.from({ length: 4 }, (_, i) => item("Ordinary body line in the left column " + i, 40, 555 - 12 * i, 240)),
+    ...Array.from({ length: 4 }, (_, i) => item("Ordinary body line in the right column " + i, 309, 555 - 12 * i, 240)),
+  ]);
+  assert.equal(page.blocks[0].type, "heading");
+  assert.equal(page.blocks[0].text, title.join(" "));
+  assert.equal(page.blocks[0].lineRects.length, 3);
 });
 test("recovers uncovered body lines without resending neighboring translated text", () => {
   const page = extractPDFJSPage(0, 595, 790, [
@@ -108,4 +123,25 @@ test("native stacked HTML keeps searchable original and translated text and esca
   assert.match(html, /&lt;script&gt;English &amp; Chinese&lt;\/script&gt;/u);
   assert.match(html, /中文&lt;安全&gt;/u);
   assert.doesNotMatch(html, /<script>/u);
+});
+
+test("bibliography is skipped across physical pages while following end matter remains eligible", () => {
+  const pages = [
+    extractPDFJSPage(0, 600, 800, [
+      item("The final paragraph of the conclusion.", 40, 720),
+      item("References", 40, 675),
+      item("1. Reference on the page where the bibliography starts.", 40, 650),
+    ]),
+    extractPDFJSPage(1, 600, 800, [
+      item("2. Reference on the following page.", 40, 720),
+      { ...item("Data availability statement", 40, 675), bold: true },
+      item("Data are available upon reasonable request.", 40, 645),
+    ]),
+  ];
+  const [first, next] = withoutBibliography(pages);
+  assert.deepEqual(first.blocks.map(block => block.text), ["The final paragraph of the conclusion."]);
+  assert.deepEqual(next.blocks.map(block => block.text), [
+    "Data availability statement", "Data are available upon reasonable request.",
+  ]);
+  assert.equal(pages[0].blocks.length, 3);
 });

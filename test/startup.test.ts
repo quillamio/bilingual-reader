@@ -1045,7 +1045,9 @@ ${error?.stack || ""}`);
       assert.deepEqual(translatedRefs(), ["0"]);
 
       Zotero.Prefs.set(skipPref, 0, true);
-      assert.equal(getTranslationPageCount(3), 3, "Keep existing all-pages settings");
+      assert.equal(getTranslationPageCount(3), 3, "Keep the existing page count");
+      await refreshBilingualReading(reader);
+      assert.deepEqual(translatedRefs(), ["0", "2"], "The legacy page count must not enable reference translation");
       setTranslateAllPages(false);
       assert.equal(getTranslationPageCount(3), 2);
     } finally {

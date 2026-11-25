@@ -73,10 +73,7 @@ async function embedPanel(out: PDFDocument, source: PDFPage,
   return { embedded, x, y, width: w, height: h, rotate: degrees(-rotation) };
 }
 
-/** Each source page is matched to all independently printed translation pages.
- * Repeat the original on continuation sheets instead of shrinking or cutting
- * a long translation. Both panels are PDF vector/form objects, not screenshots.
- */
+/** Pair each source once and keep overflow in the right panel of later sheets. */
 export async function composeSideBySidePDF(
   original: Uint8Array, transcripts: AsyncIterable<{ pageIndex: number; bytes?: Uint8Array; continuation?: Uint8Array }>,
   expectedPages?: number,
@@ -97,13 +94,14 @@ export async function composeSideBySidePDF(
     const continuation = entry.continuation && await PDFDocument.load(entry.continuation, { updateMetadata: false });
     const originalPage = source.getPage(index);
     const left = await embedPanel(out, originalPage, panelW, panelH);
-    const rightPages = [...(translated ? translated.getPages() : [originalPage]), ...(continuation ? continuation.getPages() : [])];
-    for (const rightPage of rightPages) {
+    const rightPages = [...(translated?.getPages() || []), ...(continuation?.getPages() || [])];
+    if (!rightPages.length) rightPages.push(originalPage);
+    for (const [part, rightPage] of rightPages.entries()) {
       const sheet = out.addPage([panelW * 2 + gutter, panelH]);
       sheet.drawLine({ start: { x: panelW + gutter / 2, y: 12 },
         end: { x: panelW + gutter / 2, y: panelH - 12 },
         thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
-      if (left) sheet.drawPage(left.embedded, left);
+      if (part === 0 && left) sheet.drawPage(left.embedded, left);
       const right = rightPage === originalPage ? left : await embedPanel(out, rightPage, panelW, panelH);
       if (right) sheet.drawPage(right.embedded, { ...right, x: right.x + panelW + gutter });
       sheets++;

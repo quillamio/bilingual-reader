@@ -137,8 +137,8 @@ export function setSkipLastPages(value: number): void {
 }
 
 export function getTranslateAllPages(): boolean {
-  // A saved zero from earlier versions already means all pages.
-  return Zotero.Prefs.get(TRANSLATE_ALL_PAGES_PREF, true) === true || getSkipLastPages() === 0;
+  // A legacy skipLastPages=0 includes every page but still skips references.
+  return Zotero.Prefs.get(TRANSLATE_ALL_PAGES_PREF, true) === true;
 }
 
 export function setTranslateAllPages(enabled: boolean): void {
