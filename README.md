@@ -56,7 +56,7 @@ Beta 如遇不稳定，可从 Releases 下载并重新安装 [v0.5.2 稳定版](
 3. 等待 Zotero 生成阅读模式结构化文本。
 4. 中文译文会显示在对应英文段落下方。
 5. 点击 **🔄** 可重新调度翻译。
-6. 在设置中选择 **上下对照**（默认）或 **左右对照（原 PDF｜译文）**，然后点 **🖨️** 将 PDF 存为文献附件。左右对照逐页配对。左侧保留原始 PDF 的版面、图表及可选文字，右侧为该页重新排版的可搜索译文。右侧译文过长时自动续页，并在左侧重复对应原页。默认使用 Zotero 内置能力，无需安装排版服务。
+6. 在设置中选择 **上下对照**（默认）或 **左右对照（原 PDF｜译文）**，然后点 **🖨️** 将 PDF 存为文献附件。左右对照逐页配对。左侧保留原始 PDF 的版面、图表及可选文字，右侧按原 PDF 坐标放入可搜索的译文，保留双栏、图表和分页。独立小标题单段加粗，导出时会按原 PDF 文本区域补译阅读模式漏掉的正文、标题和图注。右页的底图以图像嵌入。译文无法原位放入时，会增加对应原页的译文续页。内置解析无需配置，复杂或扫描版可选 MinerU；Docling 和其他解析器仍可从设置中选择。
 
 可以配置：
 
@@ -93,7 +93,9 @@ Beta 如遇不稳定，可从 Releases 下载并重新安装 [v0.5.2 稳定版](
 
 各 API Key 独立保存在 Zotero 本地偏好中（非系统钥匙串），可清空。云服务每次上传原始 PDF 前需用户确认；可能计费，敏感未发表资料建议本地解析。初版云解析限制 30 MB；MinerU 使用 v4 批量上传与任务轮询，Mistral 返回每页 OCR Markdown，LlamaParse 使用 v2 文件解析任务。解析错误可显式回退本地 PDF.js；尚未使用真实付费账户完成全部端到端验证。PDF 解析和文字翻译是不同服务，需分别配置。
 
-**MinerU 阅读回退**：在「设置 → 中英对照 → 解析和导出设置」选择 MinerU，填写 Token。导出会复用已完成的解析和译文。上下版导出解析后的双语文本，左右版在左侧保留带图表的原始页面。
+**MinerU 阅读回退**：在「设置 → 中英对照 → 解析和导出设置」选择 MinerU，填写 Token。导出会复用已完成的解析和译文。上下版导出解析后的双语文本，左右版可复用与原 PDF 文字层匹配的 MinerU 译文。
+
+**左右对照 PDF 正文覆盖**：以原始 PDF 的文字块为准核对译文。仅在原文文字匹配时复用阅读模式的译文，缺失块由选定的翻译引擎补译。若仍有未完成的文字块，导出前会提示涉及的页码和数量。
 
 **🖨️ Zotero 阅读模式上下对照导出**：清理读者视口的固定高度、裁切与位置样式，统一 A4 边距，等待 HTML 完全加载才打印。导出会主动渲染尚未滚动到的 Zotero 原始 PDF 图表区域，并将图片直接嵌入双语正文。
 
@@ -153,7 +155,7 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 - [Zotero Figure](https://github.com/MuiseDestiny/zotero-figure) 提供了从原 PDF 按区域裁图和按需渲染的设计参考。
 - [Zotero Interlinear](https://github.com/Muanyan-mjq/zotero-interlinear) 与 [ChanceZhangcr 的 Bilingual Reader](https://github.com/ChanceZhangcr/zotero-bilingual-reader) 提供了阅读模式重排、左右配对与可搜索 PDF 导出的设计参考。
 - [Zotero PDF2zh（guaguastandup 及贡献者）](https://github.com/guaguastandup/zotero-pdf2zh)（AGPL-3.0）：曾用于项目的左右对照导出实现。
-- [PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next) 与 [BabelDOC](https://github.com/funstory-ai/BabelDOC)：曾为 Zotero PDF2zh 集成提供排版翻译引擎。
+- [PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next) 与 [BabelDOC](https://github.com/funstory-ai/BabelDOC)：曾为 Zotero PDF2zh 集成提供排版翻译引擎。BabelDOC 的按页按块处理中间结构为本版导出覆盖检查提供了设计参考。
 - [Zotero 的 Make It Red 示例](https://github.com/zotero/make-it-red) 提供了插件启动代码的基础。
 - [Google Noto Emoji](https://github.com/googlefonts/noto-emoji)（Apache-2.0）提供了麻将红中图标。
 - [pdf-lib](https://github.com/Hopding/pdf-lib)（MIT）：实际打包依赖，用于嵌入原始 PDF 页面；相关第三方许可证见 addon/content/licenses/pdf-export-dependencies.txt。

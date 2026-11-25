@@ -88,3 +88,29 @@ if set(seen) != wanted or len(seen) != len(wanted):
 if left_original < 2 or left_rotated != 1 or min(blue, red) < 100:
     raise AssertionError(f"Missing left artwork, rotation, or continuation: {left_original}, {left_rotated}, {blue}, {red}")
 print(f"PASS: {len(paired)} paired pages, {len(seen)} right-side visible markers, repeated original={left_original}, rotated={left_rotated}.")
+
+# The toolbar fixture replaces both columns on a single original page.
+with fitz.open(path.with_name("side-by-side-export.pdf")) as positioned:
+    assert len(positioned) == 1
+    sheet = positioned[0]
+    midpoint = sheet.rect.width / 2
+    right_width = sheet.rect.width - midpoint
+    for original, translated in [
+        ("Synthetic reader layout test.", "LEFTANCHOR"),
+        ("Independent right column text.", "RIGHTANCHOR"),
+    ]:
+        source = sheet.search_for(original)
+        target = sheet.search_for(translated)
+        assert len(source) == len(target) == 1
+        assert source[0].x1 < midpoint < target[0].x0
+        assert abs(target[0].x0 - source[0].x0 - (midpoint + 8)) < 3
+        assert abs(target[0].y0 - source[0].y0) < 8
+    rgb = sheet.get_pixmap(clip=fitz.Rect(midpoint, 0, midpoint + right_width, sheet.rect.height), alpha=False)
+    samples = rgb.samples
+    assert sum(r > 160 and g < 90 and b < 90 for r, g, b in zip(
+        samples[0::3], samples[1::3], samples[2::3],
+    )) > 100
+    assert sum(b > 160 and g < 90 and r < 90 for r, g, b in zip(
+        samples[0::3], samples[1::3], samples[2::3],
+    )) > 100
+print("PASS: original bilingual-sheet text remains left; both replacements and figures remain in position on the right.")

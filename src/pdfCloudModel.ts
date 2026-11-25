@@ -64,6 +64,28 @@ export function normalizeMarkdownPages(base: NativeDocument,
   }
   return mergeCloudPages(base, source, map);
 }
+/** Convert MinerU's top-left normalized page coordinates to PDF user space. */
+function minerUTextRect(page: NativePage, raw: unknown) {
+  if (!Array.isArray(raw) || raw.length !== 4 ||
+      raw.some(value => typeof value !== "number" || !Number.isFinite(value) ||
+        value < 0 || value > 1000)) return undefined;
+  const [x0, y0, x1, y1] = raw as number[];
+  if (x1 <= x0 || y1 <= y0) return undefined;
+
+  const layout = page.layout || { width: page.width, height: page.height, transform: [1, 0, 0, -1, 0, page.height] };
+  const [a, b, c, d, e, f] = layout.transform;
+  const determinant = a * d - b * c;
+  if (!Number.isFinite(determinant) || determinant === 0) return undefined;
+  const point = (x: number, y: number) => {
+    const vx = x * layout.width / 1000 - e, vy = y * layout.height / 1000 - f;
+    return [(d * vx - c * vy) / determinant, (a * vy - b * vx) / determinant];
+  };
+  const first = point(x0, y0), last = point(x1, y1);
+  const rect = { left: Math.min(first[0], last[0]), right: Math.max(first[0], last[0]),
+    bottom: Math.min(first[1], last[1]), top: Math.max(first[1], last[1]) };
+  return Object.values(rect).every(Number.isFinite) ? rect : undefined;
+}
+
 export function normalizeMinerU(base: NativeDocument, input: unknown): NativeDocument {
   // The v4 hosted API content_list V1 format has page_idx (zero-based)
   // and text/image/table fields. Prefer the documented V1 list over V2.
@@ -86,7 +108,14 @@ export function normalizeMinerU(base: NativeDocument, input: unknown): NativeDoc
     else if (kind === "equation") { type = "formula"; value = strings(row.text); }
     if (!value.trim()) continue;
     const blocks = map.get(index) || [];
-    blocks.push(pageBlock(base.pages[index], "mineru", stripImageLinks(value), type, blocks.length));
+    const block = pageBlock(base.pages[index], "mineru", stripImageLinks(value), type, blocks.length);
+    // Image and table bboxes describe the artwork itself, not its caption.
+    const rect = kind === "text" ? minerUTextRect(base.pages[index], row.bbox) : undefined;
+    if (rect) {
+      block.bbox = rect;
+      block.lineRects = [rect];
+    }
+    blocks.push(block);
     map.set(index, blocks);
   }
   return mergeCloudPages(base, "mineru", map);

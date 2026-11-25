@@ -100,9 +100,11 @@ export async function parseWithLocalDocling(
       const doclingPage = pageMap.get(page.index);
       if (!doclingPage) throw new Error("Docling 页面缺失：" + (page.index + 1));
       return {
-        index: page.index, width: page.width, height: page.height,
-        // Preserve PDF.js text as fallback for empty Docling pages.
-        blocks: doclingPage.blocks.length ? doclingPage.blocks : page.blocks,
+        ...page,
+        // Docling identifies the full table, not individual textual cells.
+        blocks: doclingPage.blocks.length ? doclingPage.blocks.map(block => ({
+          ...block, lineRects: block.type === "table" || block.type === "picture" ? undefined : block.lineRects,
+        })) : page.blocks,
       };
     }),
     warnings: [

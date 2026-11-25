@@ -47,9 +47,10 @@ export interface TranslatedPDFPage {
   pageIndex: number;
   paragraphs: Array<{ text: string; heading?: boolean }>;
   emptyMessage?: string;
+  continuation?: boolean;
 }
 
-export function buildTranslatedPageHTML({ pageIndex, paragraphs, emptyMessage }: TranslatedPDFPage): string {
+export function buildTranslatedPageHTML({ pageIndex, paragraphs, emptyMessage, continuation }: TranslatedPDFPage): string {
   const content = paragraphs.map(({ text, heading }) => {
     const tag = heading ? "h2" : "p";
     return `<${tag}>${escapeHTML(text)}</${tag}>`;
@@ -65,7 +66,7 @@ export function buildTranslatedPageHTML({ pageIndex, paragraphs, emptyMessage }:
   h2, p { margin: 0 0 3mm; white-space: pre-wrap; overflow-wrap: anywhere; orphans: 2; widows: 2; }
   h2 { font-size: 12pt; break-after: avoid-page; }
 </style></head><body>
-<header>译文 · 原始第 ${pageIndex + 1} 页</header>
+<header>${continuation ? "译文续页" : "译文"} · 原始第 ${pageIndex + 1} 页</header>
 ${content || `<p>${escapeHTML(emptyMessage || "本页无已完成的译文。")}</p>`}
 </body></html>`;
 }

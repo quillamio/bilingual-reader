@@ -28,6 +28,18 @@ test("MinerU preserves physical pages and figure captions, with fallback on miss
   assert.ok(doc.warnings.length);
   assert.throws(() => normalizeMinerU(base(), [{page_idx: 3, text: "invalid"}]));
 });
+test("MinerU maps scanned text positions across crop offsets and rotation", () => {
+  const physical = base();
+  physical.pages[0].layout = { width: 800, height: 600, transform: [0, 1, 1, 0, -20, -10] };
+  const doc = normalizeMinerU(physical, [
+    { page_idx: 0, type: "text", text: "A scanned paragraph", bbox: [100, 200, 400, 300] },
+    { page_idx: 0, type: "image", img_caption: ["Figure 1"], bbox: [500, 400, 900, 800] },
+    { page_idx: 0, type: "text", text: "Invalid dimensions", bbox: [500, 400, 1500, 800] },
+  ]);
+  assert.deepEqual(doc.pages[0].blocks[0].lineRects, [{ left: 130, right: 190, bottom: 100, top: 340 }]);
+  assert.equal(doc.pages[0].blocks[1].lineRects, undefined);
+  assert.equal(doc.pages[0].blocks[2].lineRects, undefined);
+});
 test("Mistral and LlamaParse use distinct page conventions and never fetch image links", () => {
   const first = normalizeMarkdownPages(base(), "mistral", [
     { index: 0, markdown: "# Results\n\n![img-0.jpeg](https://invalid.test/image.jpg)\n\nFigure 1. Outcome"},

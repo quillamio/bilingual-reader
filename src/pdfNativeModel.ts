@@ -23,12 +23,15 @@ export interface NativeBlock {
   type: NativeBlockType;
   text: string;
   bbox: NativeRect;
+  lineRects?: NativeRect[];
+  lineTexts?: string[];
   source: NativeParser;
 }
 export interface NativePage {
   index: number;
   width: number;
   height: number;
+  layout?: { width: number; height: number; transform: number[] };
   blocks: NativeBlock[];
 }
 export interface NativeDocument {
@@ -58,6 +61,7 @@ export interface PDFJSTextItem {
   width?: number;
   height?: number;
   hasEOL?: boolean;
+  bold?: boolean;
 }
 
 interface Line {
@@ -66,6 +70,7 @@ interface Line {
   y: number;
   height: number;
   text: string;
+  bold: boolean;
 }
 function finite(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n);
@@ -76,7 +81,7 @@ function quantileMedian(values: number[], fallback: number): number {
   return sorted[Math.floor(sorted.length / 2)];
 }
 function rectOf(line: Line): NativeRect {
-  return { left: line.x1, right: line.x2, bottom: line.y - line.height * 0.2, top: line.y + line.height * 0.8 };
+  return { left: line.x1, right: line.x2, bottom: line.y - line.height * 0.25, top: line.y + line.height * 0.95 };
 }
 function combineRect(a: NativeRect, b: NativeRect): NativeRect {
   return {
@@ -86,10 +91,13 @@ function combineRect(a: NativeRect, b: NativeRect): NativeRect {
     top: Math.max(a.top, b.top),
   };
 }
-function labelBlock(text: string): NativeBlockType {
+function labelBlock(text: string, bold = false): NativeBlockType {
   if (/^(?:extended data )?(?:fig(?:ure)?\.?|图)\s*[\dIVX]/iu.test(text)) return "caption";
   if (/^table\s*[\dIVX]|^表\s*\d/iu.test(text)) return "caption";
   if (/^\d+(?:\.\d+){0,3}\s+[A-Z]/u.test(text) && text.length < 110) return "heading";
+  if (bold && text.length <= 145 && !/[.!?;]$/u.test(text) &&
+      (/^\S+(?:\s+\S+){2,}/u.test(text) ||
+       /^(?:abstract|introduction|results|discussion|methods|conclusions?|references)$/iu.test(text))) return "heading";
   return "paragraph";
 }
 export function pdfjsTextToLines(items: readonly PDFJSTextItem[], width: number): Line[] {
@@ -104,7 +112,7 @@ export function pdfjsTextToLines(items: readonly PDFJSTextItem[], width: number)
     const w = Math.max(1, Number(item.width) || str.length * h * 0.5);
     // Exclude objects far outside the PDF page; these are usually decorative.
     if (x < -width || x > width * 2) return [];
-    return [{ text: str, x, y, h, w, eol: !!item.hasEOL }];
+    return [{ text: str, x, y, h, w, bold: !!item.bold, eol: !!item.hasEOL }];
   });
   const baselineTolerance = Math.max(2.1, Math.min(6, quantileMedian(elements.map((e) => e.h), 10) * 0.26));
   // PDF.js text items can arrive in content-stream order, not display order.
@@ -122,14 +130,14 @@ export function pdfjsTextToLines(items: readonly PDFJSTextItem[], width: number)
     const flush = () => {
       if (!pending.length) return;
       const first = pending[0];
-      const last = pending[pending.length - 1];
       let joined = "";
       let lastEnd = first.x;
       for (const run of pending) {
         const gap = run.x - lastEnd;
         const charWidth = Math.max(2, run.w / Math.max(1, run.text.trim().length));
-        if (joined && gap > charWidth * 0.55 && !/\s$/u.test(joined) &&
-            !/^\s/u.test(run.text)) joined += " ";
+        if (joined && (gap > charWidth * 0.55 ||
+            (/\.$/u.test(joined) && /^[a-zA-Z](?:,|\s)/u.test(run.text))) &&
+            !/\s$/u.test(joined) && !/^\s/u.test(run.text)) joined += " ";
         joined += run.text;
         lastEnd = Math.max(lastEnd, run.x + run.w);
       }
@@ -139,13 +147,20 @@ export function pdfjsTextToLines(items: readonly PDFJSTextItem[], width: number)
         y: first.y,
         height: Math.max(...pending.map((run) => run.h)),
         text: joined.replace(/[ \t]+/gu, " ").trim(),
+        bold: pending.reduce((sum, run) => sum + (run.bold ? run.w : 0), 0) >=
+          pending.reduce((sum, run) => sum + run.w, 0) * 0.75,
       });
       pending = [];
     };
     for (const run of band) {
       const prior = pending[pending.length - 1];
       // Separate two-column lines sharing the same baseline.
-      if (prior && run.x - (prior.x + prior.w) > Math.max(34, width * 0.075)) flush();
+      if (prior) {
+        const end = prior.x + prior.w;
+        const gap = run.x - end;
+        const gutter = end <= width * 0.507 && run.x >= width * 0.50 && run.x <= width * 0.59;
+        if (gap > Math.max(34, width * 0.075) || (gutter && gap >= Math.max(6, width * 0.009))) flush();
+      }
       pending.push(run);
       if (run.eol) flush();
     }
@@ -172,7 +187,7 @@ export function orderPDFJSLines(lines: readonly Line[], pageWidth: number): Line
   const boundaries = [Infinity, ...headings.map((h) => h.y), -Infinity];
   for (let i = 0; i < boundaries.length - 1; i++) {
     const upper = boundaries[i], lower = boundaries[i + 1];
-    const part = remaining.filter((l) => l.y < upper && l.y > lower);
+    const part = remaining.filter((l) => l.y <= upper && l.y > lower);
     const leftPart = part.filter((l) => (l.x1 + l.x2) / 2 < pageWidth / 2.0);
     const rightPart = part.filter((l) => !leftPart.includes(l));
     ordered.push(...leftPart.sort((a, b) => b.y - a.y));
@@ -192,30 +207,57 @@ export function extractPDFJSPage(
   const typicalHeight = quantileMedian(heights, 10);
   const blocks: NativeBlock[] = [];
   let current: Line[] = [];
+  let kind: NativeBlockType = "paragraph";
   const flush = () => {
     if (!current.length) return;
     const text = current.map((line) => line.text)
       .join(" ").replace(/\s+/gu, " ").trim();
     if (text) {
-      const bbox = current.map(rectOf).reduce(combineRect);
+      const lineRects = current.map(rectOf);
+      const bbox = lineRects.reduce(combineRect);
       blocks.push({ id: "pdfjs:" + index + ":" + blocks.length, pageIndex: index,
-        order: blocks.length, type: labelBlock(text), text, bbox, source: "pdfjs" });
+        order: blocks.length, type: kind, text, bbox, lineRects,
+        lineTexts: current.map(line => line.text), source: "pdfjs" });
     }
     current = [];
   };
-  for (const line of ordered) {
+  for (const [lineIndex, line] of ordered.entries()) {
+    const lineType = labelBlock(line.text, line.bold);
     if (current.length) {
       const prev = current[current.length - 1];
       const gap = prev.y - line.y;
       const horizontalJump = Math.abs(prev.x1 - line.x1) > Math.max(45, width * 0.18);
-      const paragraphBreak = gap < -3 || gap > typicalHeight * 1.85 ||
-        horizontalJump || labelBlock(line.text) !== "paragraph";
+      const next = ordered[lineIndex + 1];
+      const indent = line.x1 - prev.x1 > Math.max(6, prev.height * 0.7) &&
+        line.x2 - line.x1 > width * 0.23 &&
+        next && Math.abs(next.x1 - prev.x1) < 4 && line.y - next.y < typicalHeight * 1.7;
+      const sameColumn = (prev.x1 + prev.x2 < width) === (line.x1 + line.x2 < width);
+      const lineHeight = Math.max(typicalHeight, Math.min(prev.height, line.height));
+      const paragraphBreak = gap < -3 || gap > lineHeight * 1.85 ||
+        horizontalJump || (indent && kind !== "caption") || !sameColumn ||
+        lineType !== "paragraph" || kind === "heading" ||
+        (kind === "caption" && Math.abs(current[0].height - line.height) > 1.5);
       if (paragraphBreak) flush();
     }
+    if (!current.length) kind = lineType;
     current.push(line);
-    if (labelBlock(line.text) !== "paragraph") flush();
   }
   flush();
+
+  // A legend may continue in the opposite column without another “Fig.” label.
+  // Keep it as a separate positioned box while preserving its caption role.
+  const legends = blocks.filter(block => block.type === "caption" && (block.lineRects?.length || 0) >= 2);
+  for (const block of blocks) {
+    if (block.type !== "paragraph" || (block.lineRects?.length || 0) < 2) continue;
+    const fontHeight = block.lineRects![0].top - block.lineRects![0].bottom;
+    if (legends.some(legend => {
+      const lead = legend.lineRects![0];
+      return legend.bbox.right <= width / 2 && block.bbox.left >= width / 2 &&
+        Math.abs(block.bbox.top - legend.bbox.top) <= fontHeight * 1.7 &&
+        Math.abs(block.bbox.bottom - legend.bbox.bottom) <= fontHeight * 2.5 &&
+        Math.abs(fontHeight - (lead.top - lead.bottom)) < 1.1;
+    })) block.type = "caption";
+  }
   return { index, width, height, blocks };
 }
 export function validateNativeDocument(input: unknown, source: "pdfjs" | "docling"): NativeDocument {
@@ -235,7 +277,11 @@ export function validateNativeDocument(input: unknown, source: "pdfjs" | "doclin
         pageIndex: page.index, order,
         type: (["heading", "paragraph", "caption", "table", "picture",
           "formula", "footnote"].includes(block.type) ? block.type : "paragraph") as NativeBlockType,
-        text: block.text, source, bbox: block.bbox || {
+        text: block.text, source,
+        lineRects: block.bbox && ["left", "bottom", "right", "top"].every(key => finite(block.bbox[key])) &&
+          block.bbox.right > block.bbox.left && block.bbox.top > block.bbox.bottom
+          ? [block.bbox] : undefined,
+        bbox: block.bbox || {
           left: 0, bottom: 0, right: page.width, top: page.height,
         },
       })),

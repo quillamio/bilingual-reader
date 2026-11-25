@@ -1,7 +1,8 @@
 import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
 import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAssets";
-import { getPDFExportLayout, getTranslationPageCount } from "./settings";
-import type { TranslatedPDFPage } from "./pdfNativeHtml";
+import { getPDFExportLayout, getTranslateAllPages } from "./settings";
+import { getNativePDFBackend } from "./pdfNativeDocling";
+import type { PositionedPDFPage } from "./pdfInPlaceLayout";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -369,7 +370,7 @@ function getHiddenBrowserConstructor(): any {
 }
 
 export async function printHTMLToPDF(
-  html: string, tempFile: any,
+  html: string, tempFile: any, size?: { width: number; height: number },
 ): Promise<void> {
   const mainWindow = Zotero.getMainWindow() as any;
   const printUtils = mainWindow?.PrintUtils;
@@ -419,7 +420,7 @@ export async function printHTMLToPDF(
     settings.printBGImages = true;
     // CSS @page sets the A4 margins. Reset prior printer offsets so the
     // entire text column is rendered inside the page instead of at x < 0.
-    configureBilingualPDFPrintSettings(settings);
+    configureBilingualPDFPrintSettings(settings, size);
     settings.headerStrLeft = "";
     settings.headerStrCenter = "";
     settings.headerStrRight = "";
@@ -439,32 +440,58 @@ export async function printHTMLToPDF(
   }
 }
 
+function blockIsHeading(source: Element | null): boolean {
+  const text = source?.textContent?.trim();
+  if (!source || !text || text.length > 145 || /[.!?]$/u.test(text)) return false;
+  const bold = Array.from(source.querySelectorAll("b,strong")) as Element[];
+  return bold.some(element => element.textContent?.trim() === text);
+}
+
+function getSDTAnchors(structure: any, path: string): number[][] {
+  if (!/^\d+(?:\.\d+)*$/u.test(path)) return [];
+  let block = structure;
+  for (const part of path.split(".")) block = block?.content?.[Number(part)];
+  return (Array.from(block?.anchor?.pageRects || []) as number[][])
+    .filter(anchor => anchor.length === 5 && anchor.every(Number.isFinite));
+}
+
 /** Read already-translated SDT paragraphs only when their physical page mapping is available. */
-function getReadingTranslationPages(reader: any, doc: Document): TranslatedPDFPage[] | null {
-  let pageCount: number;
+function getReadingTranslationPages(reader: any, doc: Document): PositionedPDFPage[] | null {
+  let structure: any;
   try {
     const view = getActiveSDTView(reader);
-    pageCount = (view?.getData?.()?.structure || view?._structure)?.catalog?.pages?.length;
+    structure = view?.getData?.()?.structure || view?._structure;
   } catch (_) {
     return null;
   }
+  const pageCount = structure?.catalog?.pages?.length;
   if (!Number.isSafeInteger(pageCount) || pageCount < 1) return null;
-  const cutoff = getTranslationPageCount(pageCount);
-  const pages = Array.from({ length: pageCount }, (_, pageIndex): TranslatedPDFPage => ({
+  const pages = Array.from({ length: pageCount }, (_, pageIndex): PositionedPDFPage => ({
     pageIndex, paragraphs: [],
-    emptyMessage: pageIndex >= cutoff ? "已按设置跳过末尾页翻译。" : undefined,
   }));
-  let done = 0;
+  if (!getTranslateAllPages()) {
+    for (const element of doc.querySelectorAll<HTMLElement>("#sdt-content .sdt-reference[data-ref-path]")) {
+      for (const [pageIndex, left, bottom, right, top] of getSDTAnchors(structure, element.dataset.refPath || "")) {
+        const page = pages[pageIndex];
+        if (page) (page.excludedRects ||= []).push({ left, bottom, right, top });
+      }
+    }
+  }
   for (const target of doc.querySelectorAll<HTMLElement>(`#sdt-content .${TRANSLATION_CLASS}[data-state="done"]`)) {
     const text = target.textContent?.trim();
     if (!text) continue;
-    const page = pages[Number(target.dataset.sourcePage) - 1];
-    if (!page) return null;
-    const heading = target.previousElementSibling?.matches("h1,h2,h3,h4,h5,h6");
-    page.paragraphs.push({ text, heading });
-    done++;
+    const source = target.previousElementSibling;
+    const heading = source?.matches("h1,h2,h3,h4,h5,h6") || blockIsHeading(source);
+    const anchors = getSDTAnchors(structure, target.dataset.sourceRefPath || "");
+    const page = pages[Number(target.dataset.sourcePage) - 1] || pages[anchors[0]?.[0]];
+    if (!page) continue;
+    // A translation spanning pages cannot be split reliably by character count.
+    const rects = anchors.every(anchor => anchor[0] === page.pageIndex)
+      ? anchors.map(([, left, bottom, right, top]) => ({ left, bottom, right, top }))
+      : [];
+    page.paragraphs.push({ text, sourceText: source?.textContent?.trim(), heading, rects });
   }
-  return done ? pages : null;
+  return pages;
 }
 
 export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null): Promise<void> {
@@ -476,7 +503,8 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
     return;
   }
   const doc = getSDTDocument(reader);
-  const pages = layout === "side-by-side" && doc ? getReadingTranslationPages(reader, doc) : null;
+  const pages = layout === "side-by-side" && doc && getNativePDFBackend() === "pdfjs"
+    ? getReadingTranslationPages(reader, doc) : null;
   if (fallback || (layout === "side-by-side" && !pages)) {
     const { exportNativePDFBilingual } = await import("./pdfNativeExport");
     await exportNativePDFBilingual(reader, button, fallback, layout);
@@ -489,13 +517,13 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
   }
 
   const { done, unfinished } = getTranslationStats(doc);
-  if (!done) {
+  if (!pages && !done) {
     showMessage(reader, "当前没有已成功完成的译文，暂时无法导出中英对照 PDF。");
     return;
   }
 
   if (
-    unfinished > 0 &&
+    !pages && unfinished > 0 &&
     !confirmMessage(
       reader,
       `当前已有 ${done} 段译文完成，仍有 ${unfinished} 段未成功完成。\n\n是否只导出已经成功的中英对照内容？`,
@@ -507,7 +535,7 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
   if (
     !confirmMessage(
       reader,
-      (pages ? "左侧保留原始 PDF 页面，右侧放该页译文。"
+      (pages ? "左侧保留原始 PDF，右侧在原文位置排入译文，并用当前引擎补译漏段。无法原位放入的译文会加在续页。"
         : "将生成一个新的上下对照 PDF。") + "\n导出后将作为附件加入这篇文献。\n\n继续导出？",
     )
   ) {
@@ -528,9 +556,12 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
   );
   if (pages) {
     try {
-      const { saveSideBySidePDF } = await import("./pdfNativeExport");
-      await saveSideBySidePDF(sourceAttachment, pages, button);
-      showMessage(reader, "左右对照导出成功。左侧为原始 PDF，右侧为译文。");
+      const { supplementReadingPDFPages, saveSideBySidePDF } = await import("./pdfNativeExport");
+      const result = await supplementReadingPDFPages(reader, sourceAttachment, pages, button);
+      if (result.missing && !confirmMessage(reader, result.missing + "\n\n仍要导出当前结果？")) return;
+      const note = await saveSideBySidePDF(reader, sourceAttachment, result.pages, button);
+      showMessage(reader, "左右对照导出成功。左侧为原始 PDF，右侧为原位译文。" +
+        (result.missing ? "\n" + result.missing : "") + note);
     } catch (error) {
       Zotero.logError(error as Error);
       showMessage(reader, `左右对照导出失败：${(error as Error)?.message || String(error)}`);

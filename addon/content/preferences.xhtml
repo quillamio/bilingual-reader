@@ -54,7 +54,7 @@
     <html:label for="bilingualreader-export-layout" style="min-width: 140px">PDF 导出版式</html:label>
     <html:select id="bilingualreader-export-layout" style="min-width: 240px; padding: 2px 8px">
       <html:option value="stacked">上下对照</html:option>
-      <html:option value="side-by-side">左右对照（原 PDF｜译文）</html:option>
+      <html:option value="side-by-side">左右对照（原 PDF｜原位译文）</html:option>
     </html:select>
   </hbox>
   <html:details id="bilingualreader-pdf-troubleshooting">
@@ -62,7 +62,7 @@
     <hbox align="center">
       <html:label for="bilingualreader-native-backend" style="min-width: 140px">PDF 解析引擎</html:label>
       <html:select id="bilingualreader-native-backend" style="min-width: 320px; padding: 2px 8px">
-        <html:option value="pdfjs">PDF.js（内置，推荐）</html:option>
+        <html:option value="pdfjs">Zotero / PDF.js（内置）</html:option>
         <html:option value="docling">Docling（本地增强，可选）</html:option>
         <html:option value="mineru">MinerU（云端 API）</html:option>
         <html:option value="mistral">Mistral OCR（云端 API）</html:option>
@@ -112,7 +112,7 @@
       <html:input id="bilingualreader-cloud-llamaparse-model" type="text" style="width: 250px; margin-inline: 8px"/>
     </html:div>
     <html:p style="max-width: 760px">
-      云端解析需单独配置密钥，上传完整 PDF 前会提示确认，可能计费。PDF.js 和 Docling 在本机解析。
+      左右对照可使用所选解析器。位置或空间不足时，译文放到续页。云端解析上传前需确认。
     </html:p>
   </html:details>
 </groupbox>

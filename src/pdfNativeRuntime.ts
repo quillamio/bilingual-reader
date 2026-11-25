@@ -87,10 +87,33 @@ function cloneForWindow<T>(value: T, target: any): T {
   } catch (_) { /* Same-origin/same compartment may not need cloneInto. */ }
   return value;
 }
+async function pdfFontWeights(page: any, items: any): Promise<Map<string, boolean>> {
+  const fonts = unwrapPDFObject(page.commonObjs);
+  const weights = new Map<string, boolean>();
+  if (!fonts?.has || !items?.length) return weights;
+  const names = new Set<string>();
+  for (let index = 0; index < items.length; index++) {
+    const name = items[index]?.fontName;
+    if (typeof name === "string") names.add(name);
+  }
+  if ([...names].some(name => !fonts.has(name)) && typeof page.getOperatorList === "function") {
+    try { await page.getOperatorList(); } catch (_) { /* Keep geometry when font data is unavailable. */ }
+  }
+  for (const name of names) {
+    if (!fonts.has(name)) continue;
+    const font = unwrapPDFObject(fonts.get(name));
+    const weight = Number(font?.cssFontInfo?.fontWeight || 0);
+    weights.set(name, Boolean(font?.bold || font?.black || weight >= 600 ||
+      /bold|demi|heavy|black/iu.test(font?.name || "")));
+  }
+  return weights;
+}
+
 export async function parseNormalPDFWithPDFJS(
   { pdf }: PDFProxyHandle,
   onProgress?: (progress: NativePDFProgress) => void,
   isCancelled?: () => boolean,
+  preserveTypography = false,
 ): Promise<NativeDocument> {
   if (!pdf?.getPage || !Number.isInteger(pdf.numPages) || pdf.numPages < 1) {
     throw new Error("无法访问原始 PDF.js 文档，请先打开普通 PDF 页面视图。");
@@ -108,26 +131,29 @@ export async function parseNormalPDFWithPDFJS(
       page = unwrapPDFObject(await pdf.getPage(index + 1));
       if (isCancelled?.()) break;
       stage = "读取页面尺寸";
-      const viewport = unwrapPDFObject(page.getViewport({ scale: 1 }));
+      const geometry = pdfPageGeometry(page);
       stage = "提取文字";
       const content = unwrapPDFObject(await page.getTextContent());
       stage = "整理文字坐标";
       const items: PDFJSTextItem[] = [];
       const source = content?.items;
+      const weights = preserveTypography ? await pdfFontWeights(page, source) : undefined;
       for (let i = 0; i < (source?.length || 0); i++) {
         const item = source[i];
         const t = item?.transform;
         if (typeof item?.str !== "string" || !t || t.length < 6) continue;
         items.push({
           str: item.str, width: item.width, height: item.height, hasEOL: item.hasEOL,
+          bold: weights?.get(item.fontName),
           transform: [t[0], t[1], t[2], t[3], t[4], t[5]],
         });
       }
-      const native = extractPDFJSPage(index, viewport.width, viewport.height, items);
+      const [left, bottom, right, top] = geometry.box;
+      const native = extractPDFJSPage(index, right - left, top - bottom, items);
       if (!native.blocks.length) {
         warnings.push("第 " + (index + 1) + " 页未提取到可翻译文本（扫描 PDF 可能需要 OCR）。");
       }
-      pages.push(native);
+      pages.push({ ...native, layout: { width: geometry.width, height: geometry.height, transform: geometry.transform } });
     } catch (error) {
       throw new Error(`第 ${index + 1} 页${stage}失败：${String(error)}`);
     } finally {
@@ -183,9 +209,39 @@ export async function renderPDFRegion(reader: any, pageIndex: number, rect: numb
     ? internal?._primaryView : internal._secondaryView;
   const renderer = baseView?._pdfRenderer;
   if (typeof renderer?.renderRegionCrops !== "function") return "";
-  const images = await renderer.renderRegionCrops(pageIndex, cloneForWindow([rect], reader?._iframeWindow));
+  const scope = baseView?._iframe?.ownerDocument?.defaultView || internal?._iframeWindow || reader?._iframeWindow;
+  const images = await renderer.renderRegionCrops(pageIndex, cloneForWindow([rect], scope));
   const png = images?.[0];
   return typeof png === "string" && png.startsWith("data:image/png;base64,") ? png : "";
+}
+
+function pdfPageGeometry(page: any) {
+  const box = Array.from(page.view as number[]);
+  const [left, bottom, right, top] = box;
+  const scale = Number(page.userUnit) || 1;
+  const rotation = ((Number(page.rotate) || 0) % 360 + 360) % 360;
+  if (box.length !== 4 || !box.every(Number.isFinite) ||
+      right <= left || top <= bottom || ![0, 90, 180, 270].includes(rotation)) {
+    throw new Error("原始 PDF 的页面坐标无效。");
+  }
+  const matrices: Record<number, number[]> = {
+    0: [1, 0, 0, -1, -left, top],
+    90: [0, 1, 1, 0, -bottom, -left],
+    180: [-1, 0, 0, 1, right, -bottom],
+    270: [0, -1, -1, 0, top, right],
+  };
+  const quarter = rotation === 90 || rotation === 270;
+  return {
+    box, transform: matrices[rotation].map(value => value * scale),
+    width: (quarter ? top - bottom : right - left) * scale,
+    height: (quarter ? right - left : top - bottom) * scale,
+  };
+}
+
+export async function getPDFPageLayout(reader: any, pageIndex: number) {
+  const handle = getNormalPDFProxy(reader);
+  if (!handle) throw new Error("无法读取原始 PDF 的页面坐标。");
+  return pdfPageGeometry(unwrapPDFObject(await handle.pdf.getPage(pageIndex + 1)));
 }
 
 export async function getOriginalPDFBytes(pdf: any): Promise<Uint8Array> {

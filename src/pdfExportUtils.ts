@@ -98,7 +98,7 @@ export function normalizeExportContent(root: HTMLElement): void {
  *
  * nsIPrintSettings margins are INCHES; @page is responsible for millimetres.
  */
-export function configureBilingualPDFPrintSettings(settings: any): void {
+export function configureBilingualPDFPrintSettings(settings: any, size?: { width: number; height: number }): void {
   settings.marginTop = 0;
   settings.marginRight = 0;
   settings.marginBottom = 0;
@@ -108,8 +108,8 @@ export function configureBilingualPDFPrintSettings(settings: any): void {
   // Fix physical paper dimensions, not merely the CSS viewport. Older Gecko
   // settings objects may expose only a subset of these properties.
   if ("paperSizeUnit" in settings) settings.paperSizeUnit = 1; // millimetres
-  if ("paperWidth" in settings) settings.paperWidth = 210;
-  if ("paperHeight" in settings) settings.paperHeight = 297;
+  if ("paperWidth" in settings) settings.paperWidth = size ? size.width * 25.4 / 72 : 210;
+  if ("paperHeight" in settings) settings.paperHeight = size ? size.height * 25.4 / 72 : 297;
   if ("orientation" in settings) settings.orientation = 0; // portrait
   for (const edge of ["Top", "Right", "Bottom", "Left"]) {
     for (const prefix of ["unwriteableMargin", "edge"]) {

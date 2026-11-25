@@ -85,6 +85,9 @@ describe("startup", function () {
         "使用 Translate for Zotero 2.4.8 的默认服务。");
       const speed = win!.document.getElementById("bilingualreader-speed-section")!;
       const speedRow = speed.querySelector("hbox")!;
+      for (let attempt = 0; attempt < 50 && win!.getComputedStyle(speedRow).marginBlockEnd === "0px"; attempt++) {
+        await Zotero.Promise.delay(30);
+      }
       assert.equal(win!.getComputedStyle(speedRow).marginBlockEnd, "4px");
       assert.equal(win!.getComputedStyle(speed.querySelector("h3")!).marginBlockStart, "0px");
       const layout = win?.document.getElementById("bilingualreader-export-layout") as HTMLSelectElement;
@@ -312,7 +315,7 @@ describe("startup", function () {
 
   it("should parse PDF.js normal-view text without SDT reading-mode data", async function () {
     const stubPage = {
-      getViewport: () => ({ width: 595, height: 842 }),
+      view: [0, 0, 595, 842],
       getTextContent: async () => ({ items: [
         { str: "Figure 1. Original chart", transform: [10,0,0,10,30,700],
           width: 180, height: 10 },
@@ -330,6 +333,8 @@ describe("startup", function () {
     const result = await parseNormalPDFWithPDFJS(handle!);
     assert.equal(result.source, "pdfjs");
     assert.equal(result.pages.length, 1);
+    assert.equal(result.pages[0].width, 595);
+    assert.equal(result.pages[0].height, 842);
     assert.equal(result.pages[0].blocks[0].type, "caption");
     assert.include(result.pages[0].blocks[1].text, "original PDF");
   });
