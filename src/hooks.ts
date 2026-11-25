@@ -11,6 +11,7 @@ async function registerPreferencesPane(): Promise<void> {
     pluginID: addon.data.config.addonID,
     id: "bilingual-reader-preferences",
     src: "content/preferences.xhtml",
+    stylesheets: ["content/preferences.css"],
     label: "中英对照",
   });
 }
@@ -23,14 +24,13 @@ function installPreferencesBrand(win: Window): void {
   const brand = doc.createElementNS("http://www.w3.org/1999/xhtml", "div") as HTMLDivElement;
   brand.id = "bilingualreader-brand";
   brand.style.cssText =
-    "display:flex;justify-content:center;align-items:center;margin:4px 0 10px 0;";
+    "display:flex;justify-content:center;align-items:center;margin:0 0 4px;";
 
   const image = doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
   image.src = `${rootURI}content/icons/mahjong-red-dragon.svg`;
   image.alt = "Bilingual Reader";
-  image.width = 64;
-  image.height = 64;
-  image.style.cssText = "display:block;width:64px;height:64px;object-fit:contain;";
+  image.width = image.height = 48;
+  image.style.cssText = "display:block;object-fit:contain;";
 
   brand.appendChild(image);
   root.prepend(brand);

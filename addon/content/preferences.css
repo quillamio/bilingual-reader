@@ -1,0 +1,33 @@
+.bilingualreader-preferences-section {
+  margin-block: 4px;
+  padding-block: 4px;
+  line-height: 1.35;
+}
+
+.bilingualreader-preferences-section :is(h2, h3) {
+  margin-block: 0 4px;
+  line-height: 1.2;
+}
+
+.bilingualreader-preferences-section p {
+  margin-block: 3px 5px;
+  line-height: 1.35;
+}
+
+.bilingualreader-preferences-section hbox:not(:last-child),
+.bilingualreader-preferences-section summary {
+  margin-block-end: 4px;
+}
+
+.bilingualreader-preferences-section details {
+  margin-block-start: 4px;
+}
+
+.bilingualreader-preferences-section div[id^="bilingualreader-cloud-"] {
+  margin-block-start: 4px;
+}
+
+.bilingualreader-preferences-section div[id^="bilingualreader-cloud-"] > input {
+  margin-block: 2px;
+  padding-block: 2px;
+}

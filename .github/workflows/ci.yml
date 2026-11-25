@@ -51,7 +51,41 @@ jobs:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
       - run: npm run test:unit
+      - run: python3 -m py_compile scripts/docling_local_server.py
+      - name: Prepare PDF render audit
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/pdf-regression"
+          python3 -m pip install --quiet pymupdf==1.26.6
       - run: npm run test
+        env:
+          BR_PDF_REGRESSION_DIR: ${{ github.workspace }}/pdf-regression
+      - name: Check real printed PDF text and figures
+        run: python3 scripts/check_printed_pdf.py pdf-regression/legacy-reflow.pdf
+      - name: Upload actual PDF fixture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-render-regression
+          path: pdf-regression/
+
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Setup JS
+        uses: zotero-plugin-dev/workflows/setup-js@main
+      - name: Download Zotero for Windows
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "zotero.zip"
+          $folder = Join-Path $env:RUNNER_TEMP "zotero"
+          Invoke-WebRequest -Uri "https://www.zotero.org/download/client/dl?channel=release&platform=win-x64-zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $folder
+          $app = Get-ChildItem -Path $folder -Filter zotero.exe -Recurse | Select-Object -First 1
+          if (!$app) { throw "Zotero executable missing from the Windows ZIP" }
+          "ZOTERO_PLUGIN_ZOTERO_BIN_PATH=$($app.FullName)" >> $env:GITHUB_ENV
+      - name: Run regression tests in Zotero
+        run: npm run test:review
 
   release:
     if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')

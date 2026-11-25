@@ -2,71 +2,151 @@
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
 
-<groupbox
+<groupbox class="bilingualreader-preferences-section"
   id="bilingualreader-settings-root"
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
 >
   <label><html:h2>中英对照阅读</html:h2></label>
-  <html:p
-    id="bilingualreader-introduction"
-    style="margin: 0 0 12px 0; line-height: 1.6; max-width: 760px"
-  >
-    在 Zotero 10 新 PDF 阅读模式中按段落显示英文原文和中文译文。默认使用 Translate for
-    Zotero（推荐使用google，其次必应）；Ollama 作为可选后端保留。
-  </html:p>
-
-  <hbox align="center" style="margin-bottom: 10px">
+  <hbox align="center">
     <html:label for="bilingualreader-engine" style="min-width: 130px">翻译后端</html:label>
-    <html:select id="bilingualreader-engine" style="min-width: 320px; padding: 4px 8px">
-      <html:option value="pdftranslate">Translate for Zotero（推荐）</html:option>
-      <html:option value="ollama">Ollama</html:option>
+    <html:select id="bilingualreader-engine" style="min-width: 320px; padding: 2px 8px">
+      <html:option value="pdftranslate">Translate for Zotero（默认）</html:option>
+      <html:option value="google">Google 翻译（免 API Key）</html:option>
+      <html:option value="googleapi">Google 翻译备用入口（免 API Key）</html:option>
+      <html:option value="bing">Bing 翻译（免 API Key）</html:option>
+      <html:option value="ollama">Ollama（本地/云端）</html:option>
     </html:select>
+    <html:span id="bilingualreader-engine-status" role="status"
+      style="margin-inline-start: 10px; max-width: 260px; white-space: normal; overflow-wrap: anywhere"></html:span>
   </hbox>
 </groupbox>
 
-<groupbox id="bilingualreader-pdftranslate-section">
-  <label><html:h3>Translate for Zotero</html:h3></label>
-  <html:p
-    id="bilingualreader-pdftranslate-status"
-    style="line-height: 1.6; margin: 0 0 10px 0; max-width: 760px"
-  ></html:p>
-
-  <html:p
-    id="bilingualreader-pdftranslate-policy"
-    style="line-height: 1.6; margin: 0; max-width: 760px"
-  >
-    固定跟随 Translate for Zotero 当前默认服务。请在 Translate for Zotero 中切换服务或配置密钥。
-    Bilingual Reader 只负责分段、调度、缓存和双语排版。
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-service-config-section">
+  <label><html:h3>引擎配置</html:h3></label>
+  <html:p id="bilingualreader-service-config-hint">
+  </html:p>
+  <html:div id="bilingualreader-service-fields" style="display: flex; flex-direction: column; gap: 4px; max-width: 760px"></html:div>
+  <hbox align="center">
+    <html:button id="bilingualreader-test-service" type="button" style="padding: 2px 12px">
+      测试服务
+    </html:button>
+    <html:span style="margin-left: 10px; max-width: 550px">
+      向所选服务发送一条测试短句。
+    </html:span>
+  </hbox>
+  <html:p id="bilingualreader-dictionary-note">
+    词典类服务（不推荐用于长文翻译）：Cambridge、Bing Dict 等只支持查词。
   </html:p>
 </groupbox>
 
-<groupbox id="bilingualreader-page-section">
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-pdftranslate-section">
+  <label><html:h3>Translate for Zotero</html:h3></label>
+  <html:p
+    id="bilingualreader-pdftranslate-status"
+    style="max-width: 760px"
+  ></html:p>
+</groupbox>
+
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-native-section">
+  <label><html:h3>双语阅读与 PDF 导出</html:h3></label>
+  <html:p>点 🀄 开启上下双语对照，点 🖨️ 导出 PDF。Zotero 阅读模式失败时，已配置的 MinerU 可在确认上传后接替解析。</html:p>
+  <hbox align="center">
+    <html:label for="bilingualreader-export-layout" style="min-width: 140px">PDF 导出版式</html:label>
+    <html:select id="bilingualreader-export-layout" style="min-width: 240px; padding: 2px 8px">
+      <html:option value="stacked">上下对照</html:option>
+      <html:option value="side-by-side">左右对照（原 PDF｜原位译文）</html:option>
+    </html:select>
+  </hbox>
+  <html:details id="bilingualreader-pdf-troubleshooting">
+    <html:summary style="cursor: pointer">解析和导出设置</html:summary>
+    <hbox align="center">
+      <html:label for="bilingualreader-native-backend" style="min-width: 140px">PDF 解析引擎</html:label>
+      <html:select id="bilingualreader-native-backend" style="min-width: 320px; padding: 2px 8px">
+        <html:option value="pdfjs">Zotero / PDF.js（内置）</html:option>
+        <html:option value="docling">Docling（本地增强，可选）</html:option>
+        <html:option value="mineru">MinerU（云端 API）</html:option>
+        <html:option value="mistral">Mistral OCR（云端 API）</html:option>
+        <html:option value="llamaparse">LlamaParse（云端 API）</html:option>
+      </html:select>
+    </hbox>
+    <html:div id="bilingualreader-docling-section" hidden="hidden">
+      <hbox align="center">
+        <html:label for="bilingualreader-docling-url" style="min-width: 140px">本地 Docling 地址</html:label>
+        <html:input id="bilingualreader-docling-url" type="text"
+          style="width: 380px; padding: 2px 8px" placeholder="http://127.0.0.1:8786"/>
+        <html:button id="bilingualreader-test-docling" type="button"
+          style="margin-left: 8px; padding: 2px 10px">测试连接</html:button>
+        <html:span id="bilingualreader-docling-status" role="status" style="margin-inline-start: 10px"></html:span>
+      </hbox>
+      <html:p style="max-width: 760px">
+        Docling 需要另行在 Mac 安装 Python 与 Docling，然后运行源码中的
+        scripts/docling_local_server.py。Docling 仅连接 127.0.0.1/localhost；首次离线使用可能需要提前下载模型。
+        若 Docling 服务不可用，可手动回退 PDF.js。
+      </html:p>
+    </html:div>
+    <html:div id="bilingualreader-cloud-mineru-section" hidden="hidden">
+      <html:p><html:a id="bilingualreader-mineru-link" href="https://mineru.net/apiManage/docs?openApplyModal=true">申请 MinerU Token</html:a></html:p>
+      <html:label for="bilingualreader-cloud-mineru-key">MinerU Token</html:label>
+      <html:input id="bilingualreader-cloud-mineru-key" type="password" autocomplete="off" style="width: 340px; margin-left: 8px"/>
+      <html:br/>
+      <html:label for="bilingualreader-cloud-mineru-model">模型（vlm / pipeline）</html:label>
+      <html:input id="bilingualreader-cloud-mineru-model" type="text" style="width: 250px; margin-inline: 8px"/>
+      <html:p>
+        <html:button id="bilingualreader-test-mineru" type="button">验证 Token</html:button>
+        <html:span id="bilingualreader-mineru-status" role="status" style="margin-inline-start: 10px"></html:span>
+      </html:p>
+      <html:p>验证只向 MinerU 请求上传地址，无需上传 PDF。</html:p>
+    </html:div>
+    <html:div id="bilingualreader-cloud-mistral-section" hidden="hidden">
+      <html:label for="bilingualreader-cloud-mistral-key">Mistral API Key</html:label>
+      <html:input id="bilingualreader-cloud-mistral-key" type="password" autocomplete="off" style="width: 340px; margin-left: 8px"/>
+      <html:br/>
+      <html:label for="bilingualreader-cloud-mistral-model">OCR 模型</html:label>
+      <html:input id="bilingualreader-cloud-mistral-model" type="text" style="width: 250px; margin-inline: 8px"/>
+    </html:div>
+    <html:div id="bilingualreader-cloud-llamaparse-section" hidden="hidden">
+      <html:label for="bilingualreader-cloud-llamaparse-key">LlamaParse API Key</html:label>
+      <html:input id="bilingualreader-cloud-llamaparse-key" type="password" autocomplete="off" style="width: 340px; margin-left: 8px"/>
+      <html:br/>
+      <html:label for="bilingualreader-cloud-llamaparse-model">解析档位（agentic 等）</html:label>
+      <html:input id="bilingualreader-cloud-llamaparse-model" type="text" style="width: 250px; margin-inline: 8px"/>
+    </html:div>
+    <html:p style="max-width: 760px">
+      左右对照可使用所选解析器。位置或空间不足时，译文放到续页。云端解析上传前需确认。
+    </html:p>
+  </html:details>
+</groupbox>
+
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-page-section">
   <label><html:h3>翻译范围</html:h3></label>
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center" style="gap: 16px">
+    <html:label><html:input type="radio" name="bilingualreader-translation-scope"
+      id="bilingualreader-translate-non-references"/> 翻译非参考文献段落</html:label>
+    <html:label><html:input type="radio" name="bilingualreader-translation-scope"
+      id="bilingualreader-translate-all-pages"/> 翻译所有页面</html:label>
+  </hbox>
+  <hbox align="center">
     <html:label for="bilingualreader-skip-last-pages" style="min-width: 180px"
       >不翻译末尾页数</html:label
     >
     <html:input
       id="bilingualreader-skip-last-pages"
       type="number"
-      min="0"
+      min="1"
       max="50"
       step="1"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 1 页。常用于跳过论文最后的参考文献页；设为 0 表示不按页数跳过。</html:span
+      >非参考文献模式默认跳过最后一页及 Zotero 标记的参考文献。单页 PDF 仍可翻译正文。</html:span
     >
   </hbox>
-  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
-    插件同时继续跳过 Zotero 已明确标记为参考文献的结构化段落。页数限制按 PDF 物理页计算。
-  </html:p>
 </groupbox>
 
-<groupbox id="bilingualreader-speed-section">
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-speed-section">
   <label><html:h3>速度与稳定性</html:h3></label>
 
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-max-concurrent" style="min-width: 180px"
       >最大并发请求</html:label
     >
@@ -76,14 +156,14 @@
       min="1"
       max="3"
       step="1"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 2。通常比完全串行明显更快，同时避免一次发出过多请求。</html:span
+      >默认 2。免密钥网页引擎强制单并发；API 和自托管引擎使用配置的并发数。</html:span
     >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-request-gap" style="min-width: 180px"
       >请求启动间隔（毫秒）</html:label
     >
@@ -93,14 +173,14 @@
       min="0"
       max="5000"
       step="50"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 250。公共免费服务若频繁限流，可提高到 500–1000。</html:span
+      >默认 250。免密钥网页服务至少间隔 750 毫秒（Bing 为 300 毫秒）；遇到限流可调高。</html:span
     >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-max-chars" style="min-width: 180px"
       >单次请求最大字符数</html:label
     >
@@ -110,14 +190,14 @@
       min="500"
       max="8000"
       step="100"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
       >默认 2800。超长段落会自动拆成较小片段，降低大文本请求失败概率。</html:span
     >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-max-batch-paragraphs" style="min-width: 180px"
       >单次合并段落数</html:label
     >
@@ -127,15 +207,15 @@
       min="1"
       max="12"
       step="1"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 6。短段落会在字符上限内合并请求；标记未被翻译服务保留时会自动逐段重试。设为 1
+      >默认 6。仅兼容后端和 Ollama 使用多段合并；所有内置引擎逐段翻译。设为 1
       可关闭合并。</html:span
     >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-request-timeout" style="min-width: 180px"
       >单次请求超时（毫秒）</html:label
     >
@@ -145,14 +225,14 @@
       min="5000"
       max="300000"
       step="5000"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
       >默认 60000。防止失效服务永久占用任务；使用较慢的本地模型时可提高。</html:span
     >
   </hbox>
 
-  <hbox align="center" style="margin-bottom: 10px">
+  <hbox align="center">
     <html:label for="bilingualreader-max-errors" style="min-width: 180px"
       >连续失败后暂停</html:label
     >
@@ -162,7 +242,7 @@
       min="1"
       max="20"
       step="1"
-      style="width: 110px; padding: 4px 6px"
+      style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
       >默认 3 次。避免失效服务持续请求整篇论文。</html:span
@@ -170,73 +250,76 @@
   </hbox>
 
   <hbox align="center">
-    <html:button id="bilingualreader-save" type="button" style="padding: 6px 16px"
-      >保存设置</html:button
-    >
     <html:span
       id="bilingualreader-settings-status"
-      style="margin-left: 12px; line-height: 1.5"
+      role="status"
+
     ></html:span>
   </hbox>
 </groupbox>
 
-<groupbox id="bilingualreader-cache-section">
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-cache-section">
   <label><html:h3>翻译缓存</html:h3></label>
-  <html:p id="bilingualreader-cache-status" style="line-height: 1.6; margin: 0 0 8px 0"></html:p>
   <hbox align="center">
-    <html:button id="bilingualreader-clear-cache" type="button" style="padding: 5px 12px"
+    <html:label for="bilingualreader-cache-max-entries" style="min-width: 180px">最多缓存段数</html:label>
+    <html:input id="bilingualreader-cache-max-entries" type="number" min="0" max="2147483647" step="1"
+      style="width: 110px; padding: 2px 6px"/>
+    <html:span style="margin-left: 10px">默认 1500，填 0 可关闭缓存。</html:span>
+  </hbox>
+  <html:p id="bilingualreader-cache-status"></html:p>
+  <hbox align="center">
+    <html:button id="bilingualreader-clear-cache" type="button" style="padding: 2px 12px"
       >清除翻译缓存</html:button
     >
     <html:span style="margin-left: 10px; max-width: 560px"
-      >缓存采用自动上限和最近使用淘汰，避免长期阅读后偏好存储无限增长。</html:span
+      >达到段数或存储上限时，优先清理最久未使用的译文。</html:span
     >
   </hbox>
 </groupbox>
 
-<groupbox id="bilingualreader-ollama-section">
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-ollama-section">
   <label><html:h3>Ollama（可选）</html:h3></label>
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-ollama-url" style="min-width: 130px">服务地址</html:label>
     <html:input
       id="bilingualreader-ollama-url"
       type="text"
-      style="width: 430px; padding: 4px 6px"
+      style="width: 430px; padding: 2px 6px"
       placeholder="http://127.0.0.1:11434"
     />
   </hbox>
-  <hbox align="center" style="margin-bottom: 8px">
+  <hbox align="center">
     <html:label for="bilingualreader-ollama-model" style="min-width: 130px">模型</html:label>
     <html:input
       id="bilingualreader-ollama-model"
       type="text"
-      style="width: 430px; padding: 4px 6px"
+      style="width: 430px; padding: 2px 6px"
       placeholder="gpt-oss:20b"
     />
   </hbox>
   <hbox align="center">
     <spacer width="130" />
-    <html:button id="bilingualreader-test-ollama" type="button" style="padding: 5px 12px"
+    <html:button id="bilingualreader-test-ollama" type="button" style="padding: 2px 12px"
       >测试 Ollama 连接</html:button
     >
   </hbox>
 </groupbox>
 
-<groupbox>
+<groupbox class="bilingualreader-preferences-section">
   <label><html:h3>刷新说明</html:h3></label>
-  <html:p style="line-height: 1.6; margin: 0; max-width: 760px">
-    修改翻译后端或速度参数后，回到 PDF 阅读器点击
-    🔄。插件会取消旧任务、清除旧错误结果，并按照当前设置重新调度未成功的段落。
+  <html:p style="max-width: 760px">
+    设置自动保存。已打开的 PDF 可点 🔄 应用翻译范围和引擎设置。
   </html:p>
 </groupbox>
 
-<groupbox>
+<groupbox class="bilingualreader-preferences-section">
   <label><html:h3>项目主页</html:h3></label>
-  <html:p style="line-height: 1.6; margin: 0">
+  <html:p>
     <html:a
       id="bilingualreader-github-link"
       href="https://github.com/quillamio/bilingual-reader"
       style="cursor: pointer"
       >https://github.com/quillamio/bilingual-reader</html:a
-    >
+    >　欢迎大家 Star ⭐️
   </html:p>
 </groupbox>

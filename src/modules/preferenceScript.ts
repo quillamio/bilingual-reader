@@ -1,14 +1,14 @@
 import {
-  DEFAULT_MAX_CHARS_PER_REQUEST,
-  DEFAULT_MAX_BATCH_PARAGRAPHS,
-  DEFAULT_MAX_CONCURRENT,
-  DEFAULT_MAX_CONSECUTIVE_ERRORS,
   DEFAULT_OLLAMA_MODEL,
-  DEFAULT_OLLAMA_URL,
-  DEFAULT_REQUEST_GAP_MS,
-  DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_SKIP_LAST_PAGES,
+  getCacheMaxEntries,
+  getTranslateAllPages,
+  setCacheMaxEntries,
+  setTranslateAllPages,
+  DEFAULT_OLLAMA_URL,
   getEngine,
+  getPDFExportLayout,
+  setPDFExportLayout,
   getMaxCharsPerRequest,
   getMaxBatchParagraphs,
   getMaxConcurrent,
@@ -28,9 +28,26 @@ import {
   setRequestGapMs,
   setRequestTimeoutMs,
   setSkipLastPages,
-  type TranslationEngine,
 } from "../settings";
-import { clearTranslationCache, getTranslationCacheStats } from "../translationCache";
+import { clearTranslationCache, enforceTranslationCacheLimit, getTranslationCacheStats } from "../translationCache";
+import {
+  SERVICE_CATALOG,
+  getServiceDefinition,
+  DICTIONARY_ONLY_SERVICES,
+  getServiceSetting,
+  updateServiceSettings,
+  isManagedService,
+} from "../serviceCatalog";
+import { translateNativeParagraph } from "../nativeTranslation";
+import {
+  getNativePDFBackend, setNativePDFBackend, getDoclingEndpoint, setDoclingEndpoint,
+  checkDoclingConnection,
+} from "../pdfNativeDocling";
+import { isCloudParser } from "../pdfCloudModel";
+import { checkMinerUConnection, getCloudKey, getCloudModel, setCloudKey, setCloudModel } from "../pdfCloudParsers";
+
+
+const CLOUD_PROVIDERS = ["mineru", "mistral", "llamaparse"] as const;
 
 const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
 
@@ -43,51 +60,230 @@ function setStatus(doc: Document, message: string): void {
   if (status) status.textContent = message;
 }
 
+type FeedbackState = "pending" | "success" | "error";
+
+function setFeedback(doc: Document, name: string, message = "", state?: FeedbackState): void {
+  const status = getElement<HTMLElement>(doc, "bilingualreader-" + name + "-status");
+  if (!status) return;
+  const palette = {
+    pending: ["#1e40af", "#dbeafe"],
+    success: ["#166534", "#dcfce7"],
+    error: ["#991b1b", "#fee2e2"],
+  };
+  const [color, background] = state ? palette[state] : ["", ""];
+  status.dataset.state = state || "";
+  status.style.color = color;
+  status.style.backgroundColor = background;
+  status.style.padding = state ? "3px 6px" : "";
+  status.style.borderRadius = state ? "4px" : "";
+  status.textContent = message;
+}
+
+function onPreferenceEdit<T extends HTMLInputElement | HTMLSelectElement>(
+  control: T | null,
+  save: (control: T) => void,
+  saveOnInput = true,
+): void {
+  const doc = control?.ownerDocument;
+  if (!control || !doc) return;
+  const commit = () => {
+    try {
+      const previousError = control.title;
+      save(control);
+      const status = getElement<HTMLElement>(doc, "bilingualreader-settings-status");
+      if (previousError && status?.textContent === previousError) status.textContent = "";
+      control.removeAttribute("aria-invalid");
+      control.removeAttribute("title");
+    } catch (error) {
+      const message = (error as Error).message;
+      control.setAttribute("aria-invalid", "true");
+      control.title = message;
+      setStatus(doc, message);
+    }
+  };
+  control.addEventListener("change", commit);
+  if (saveOnInput && control.localName === "input" && (control as HTMLInputElement).type !== "checkbox") {
+    control.addEventListener("input", commit);
+  }
+}
+
+function bindTextPreference(
+  doc: Document, id: string, value: string, save: (value: string) => void,
+): void {
+  const input = getElement<HTMLInputElement>(doc, id);
+  if (!input) return;
+  input.value = value;
+  onPreferenceEdit(input, (control) => save(control.value));
+}
+
 function updateBackendVisibility(doc: Document): void {
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
   const pdfSection = getElement<HTMLElement>(doc, "bilingualreader-pdftranslate-section");
   const ollamaSection = getElement<HTMLElement>(doc, "bilingualreader-ollama-section");
   if (pdfSection) pdfSection.hidden = engine !== "pdftranslate";
   if (ollamaSection) ollamaSection.hidden = engine !== "ollama";
+  const configSection = getElement<HTMLElement>(doc, "bilingualreader-service-config-section");
+  if (configSection) configSection.hidden = !engine || !isManagedService(engine);
+  renderServiceFields(doc, engine || "");
 }
 
-function readNumberInput(doc: Document, id: string, fallback: number): number {
-  const input = getElement<HTMLInputElement>(doc, id);
-  const value = Number(input?.value);
-  return Number.isFinite(value) ? value : fallback;
+
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+function html(doc: Document, name: string): HTMLElement {
+  return doc.createElementNS(HTML_NS, name) as HTMLElement;
 }
 
-function saveSettings(doc: Document): void {
-  const engineValue = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value;
-  const engine: TranslationEngine = engineValue === "ollama" ? "ollama" : "pdftranslate";
-  const url =
-    getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url")?.value || DEFAULT_OLLAMA_URL;
-  const model =
-    getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model")?.value ||
-    DEFAULT_OLLAMA_MODEL;
+function renderServiceSelector(doc: Document): void {
+  const select = getElement<HTMLSelectElement>(doc, "bilingualreader-engine");
+  if (!select) return;
+  while (select.firstChild) select.removeChild(select.firstChild);
+  const pdfTranslate = html(doc, "option") as HTMLOptionElement;
+  pdfTranslate.value = "pdftranslate";
+  pdfTranslate.textContent = "Translate for Zotero（默认）";
+  select.append(pdfTranslate);
 
-  setEngine(engine);
-  setOllamaURL(url);
-  setOllamaModel(model);
-  setSkipLastPages(
-    readNumberInput(doc, "bilingualreader-skip-last-pages", DEFAULT_SKIP_LAST_PAGES),
-  );
-  setMaxConcurrent(readNumberInput(doc, "bilingualreader-max-concurrent", DEFAULT_MAX_CONCURRENT));
-  setRequestGapMs(readNumberInput(doc, "bilingualreader-request-gap", DEFAULT_REQUEST_GAP_MS));
-  setMaxCharsPerRequest(
-    readNumberInput(doc, "bilingualreader-max-chars", DEFAULT_MAX_CHARS_PER_REQUEST),
-  );
-  setMaxBatchParagraphs(
-    readNumberInput(doc, "bilingualreader-max-batch-paragraphs", DEFAULT_MAX_BATCH_PARAGRAPHS),
-  );
-  setMaxConsecutiveErrors(
-    readNumberInput(doc, "bilingualreader-max-errors", DEFAULT_MAX_CONSECUTIVE_ERRORS),
-  );
-  setRequestTimeoutMs(
-    readNumberInput(doc, "bilingualreader-request-timeout", DEFAULT_REQUEST_TIMEOUT_MS),
-  );
+  const names: Record<string, string> = {
+    free: "免 API Key（在线网页翻译）",
+    api: "需 API Key（各自配置密钥）",
+    local: "自托管服务（指定本地地址）",
+  };
+  for (const group of ["free", "api", "local"]) {
+    const optgroup = html(doc, "optgroup") as HTMLOptGroupElement;
+    optgroup.label = names[group];
+    for (const service of SERVICE_CATALOG.filter((item) => item.group === group)) {
+      const option = html(doc, "option") as HTMLOptionElement;
+      option.value = service.id;
+      option.textContent = service.help ? service.label + " · 不推荐" : service.label;
+      optgroup.append(option);
+    }
+    select.append(optgroup);
+  }
+  const ollama = html(doc, "option") as HTMLOptionElement;
+  ollama.value = "ollama";
+  ollama.textContent = "Ollama 本地 / 云端";
+  select.append(ollama);
+}
 
-  setStatus(doc, "设置已保存。返回正在阅读的 PDF 后点击 🔄 即可应用。 ");
+function renderServiceFields(doc: Document, id: string): void {
+  const target = getElement<HTMLElement>(doc, "bilingualreader-service-fields");
+  const hint = getElement<HTMLElement>(doc, "bilingualreader-service-config-hint");
+  if (!target) return;
+  while (target.firstChild) target.removeChild(target.firstChild);
+  const definition = getServiceDefinition(id);
+  if (!definition) return;
+  if (hint) {
+    hint.textContent = definition.help || (definition.fields.length
+      ? "密钥和服务配置保存在本机。"
+      : "此服务无需配置。");
+  }
+  for (const field of definition.fields) {
+    const wrap = html(doc, "div");
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "12px";
+    const label = html(doc, "label") as HTMLLabelElement;
+    label.textContent = field.label;
+    label.style.minWidth = "210px";
+    label.style.maxWidth = "210px";
+    const elementId = "bilingualreader-service-field-" + field.key;
+    label.htmlFor = elementId;
+    let input: HTMLInputElement | HTMLSelectElement;
+    if (field.type === "select") {
+      const select = html(doc, "select") as HTMLSelectElement;
+      for (const optionSpec of field.options || []) {
+        const option = html(doc, "option") as HTMLOptionElement;
+        option.value = optionSpec.value;
+        option.textContent = optionSpec.label;
+        select.append(option);
+      }
+      input = select;
+    } else {
+      const textInput = html(doc, "input") as HTMLInputElement;
+      textInput.type = field.type === "password" ? "password" : "text";
+      textInput.autocomplete = "off";
+      input = textInput;
+    }
+    input.id = elementId;
+    input.style.flex = "1";
+    input.style.minWidth = "200px";
+    input.style.padding = "5px 6px";
+    input.value = getServiceSetting(id, field.key);
+    onPreferenceEdit(input, (control) => {
+      if (control.value.trim() !== getServiceSetting(id, field.key)) setFeedback(doc, "engine");
+      updateServiceSettings(id, { [field.key]: control.value });
+    });
+    wrap.append(label, input);
+    target.append(wrap);
+  }
+}
+async function testSelectedService(doc: Document): Promise<void> {
+  const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine")?.value || "";
+  if (!isManagedService(engine)) return;
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-service");
+  if (button?.disabled) return;
+  const invalidField = doc.querySelector<HTMLElement>(
+    '#bilingualreader-service-fields [aria-invalid="true"]',
+  );
+  if (invalidField) {
+    invalidField.focus();
+    setFeedback(doc, "engine", invalidField.title, "error");
+    return;
+  }
+  if (button) button.disabled = true;
+  const status = getElement<HTMLElement>(doc, "bilingualreader-engine-status");
+  setFeedback(doc, "engine", "正在测试…", "pending");
+  try {
+    const result = await translateNativeParagraph("The patient received treatment.", engine);
+    if (getEngine() === engine && status?.dataset.state === "pending") {
+      setFeedback(doc, "engine", "连接成功 · " + result.slice(0, 80), "success");
+    }
+  } catch (error: any) {
+    if (getEngine() === engine && status?.dataset.state === "pending") {
+      setFeedback(doc, "engine", "测试失败 · " + (error?.message || "未知错误"), "error");
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function testMinerU(doc: Document): Promise<void> {
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-mineru");
+  const status = getElement<HTMLElement>(doc, "bilingualreader-mineru-status");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  setFeedback(doc, "mineru", "正在验证…", "pending");
+  try {
+    await checkMinerUConnection();
+    if (status?.dataset.state === "pending") {
+      setFeedback(doc, "mineru", "验证成功 · MinerU 已返回上传地址", "success");
+    }
+  } catch (error) {
+    if (status?.dataset.state === "pending") {
+      setFeedback(doc, "mineru", "验证失败 · " + (error as Error).message, "error");
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function testDocling(doc: Document): Promise<void> {
+  const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-docling");
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  try {
+    const url = getElement<HTMLInputElement>(
+      doc, "bilingualreader-docling-url",
+    )?.value || getDoclingEndpoint();
+    setFeedback(doc, "docling", "正在测试…", "pending");
+    const connected = await checkDoclingConnection(url);
+    setFeedback(doc, "docling", connected ? "连接成功" : "响应格式无效",
+      connected ? "success" : "error");
+  } catch (error: any) {
+    setFeedback(doc, "docling", "连接失败 · " + String(error?.message || error), "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function testOllama(doc: Document): Promise<void> {
@@ -101,7 +297,8 @@ async function testOllama(doc: Document): Promise<void> {
   const button = getElement<HTMLButtonElement>(doc, "bilingualreader-test-ollama");
   if (button?.disabled) return;
   if (button) button.disabled = true;
-  setStatus(doc, `正在连接 ${url} …`);
+  setFeedback(doc, "engine", "正在测试…", "pending");
+  const status = getElement<HTMLElement>(doc, "bilingualreader-engine-status");
   try {
     const xhr = await Zotero.HTTP.request("GET", `${url}/api/tags`, {
       responseType: "json",
@@ -117,19 +314,18 @@ async function testOllama(doc: Document): Promise<void> {
           .map((entry: any) => String(entry?.name || entry?.model || ""))
           .filter(Boolean)
       : [];
+    if (getEngine() !== "ollama" || status?.dataset.state !== "pending") return;
     const hasModel = models.includes(model);
     if (models.length) {
-      setStatus(
-        doc,
-        hasModel
-          ? `Ollama 连接成功，并检测到模型 ${model}。`
-          : `Ollama 连接成功，但模型列表中未发现 ${model}。已检测：${models.slice(0, 8).join(", ")}`,
-      );
+      setFeedback(doc, "engine", hasModel ? `连接成功 · 已检测到 ${model}`
+        : `连接成功 · 本地列表未找到 ${model}`, "success");
     } else {
-      setStatus(doc, "Ollama 连接成功。未读取到本地模型列表；云模型仍可能可以直接调用。");
+      setFeedback(doc, "engine", "连接成功 · 本地模型列表为空", "success");
     }
   } catch (error: any) {
-    setStatus(doc, `Ollama 连接失败：${error?.message || String(error)}`);
+    if (getEngine() === "ollama" && status?.dataset.state === "pending") {
+      setFeedback(doc, "engine", `连接失败 · ${error?.message || String(error)}`, "error");
+    }
   } finally {
     if (button) button.disabled = false;
   }
@@ -167,19 +363,17 @@ function updatePDFTranslateStatus(doc: Document): void {
     version = "";
   }
 
-  target.textContent = version
-    ? `已检测到 Translate for Zotero ${version}。Bilingual Reader 将固定跟随它当前的默认服务。`
-    : "已检测到 Translate for Zotero。Bilingual Reader 将固定跟随它当前的默认服务。";
+  target.textContent = `使用 Translate for Zotero${version ? " " + version : ""} 的默认服务。`;
 }
 
-function registerProjectLink(doc: Document): void {
-  getElement<HTMLAnchorElement>(doc, "bilingualreader-github-link")?.addEventListener(
+function registerExternalLink(doc: Document, id: string, url: string): void {
+  getElement<HTMLAnchorElement>(doc, id)?.addEventListener(
     "click",
     (event) => {
       event.preventDefault();
       const launcher = (Zotero as any).launchURL;
-      if (typeof launcher === "function") launcher(PROJECT_URL);
-      else doc.defaultView?.open(PROJECT_URL, "_blank");
+      if (typeof launcher === "function") launcher(url);
+      else doc.defaultView?.open(url, "_blank");
     },
   );
 }
@@ -190,44 +384,133 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   if (!root || root.dataset.initialized === "true") return;
   root.dataset.initialized = "true";
 
+  renderServiceSelector(doc);
   const engine = getElement<HTMLSelectElement>(doc, "bilingualreader-engine");
-  const url = getElement<HTMLInputElement>(doc, "bilingualreader-ollama-url");
-  const model = getElement<HTMLInputElement>(doc, "bilingualreader-ollama-model");
-  const skipLastPages = getElement<HTMLInputElement>(doc, "bilingualreader-skip-last-pages");
-  const maxConcurrent = getElement<HTMLInputElement>(doc, "bilingualreader-max-concurrent");
-  const gap = getElement<HTMLInputElement>(doc, "bilingualreader-request-gap");
-  const maxChars = getElement<HTMLInputElement>(doc, "bilingualreader-max-chars");
-  const maxBatchParagraphs = getElement<HTMLInputElement>(
-    doc,
-    "bilingualreader-max-batch-paragraphs",
-  );
-  const maxErrors = getElement<HTMLInputElement>(doc, "bilingualreader-max-errors");
-  const requestTimeout = getElement<HTMLInputElement>(doc, "bilingualreader-request-timeout");
-
   if (engine) engine.value = getEngine();
-  if (url) url.value = getOllamaURL();
-  if (model) model.value = getOllamaModel();
-  if (skipLastPages) skipLastPages.value = String(getSkipLastPages());
-  if (maxConcurrent) maxConcurrent.value = String(getMaxConcurrent());
-  if (gap) gap.value = String(getRequestGapMs());
-  if (maxChars) maxChars.value = String(getMaxCharsPerRequest());
-  if (maxBatchParagraphs) maxBatchParagraphs.value = String(getMaxBatchParagraphs());
-  if (maxErrors) maxErrors.value = String(getMaxConsecutiveErrors());
-  if (requestTimeout) requestTimeout.value = String(getRequestTimeoutMs());
+  onPreferenceEdit(engine, (control) => {
+    setEngine(control.value);
+    updateBackendVisibility(doc);
+    setFeedback(doc, "engine");
+  });
+
+  const native = getElement<HTMLSelectElement>(doc, "bilingualreader-native-backend");
+  const refreshParserFields = () => {
+    const docling = getElement<HTMLElement>(doc, "bilingualreader-docling-section");
+    if (docling) docling.hidden = native?.value !== "docling";
+    for (const provider of CLOUD_PROVIDERS) {
+      const section = getElement<HTMLElement>(doc, "bilingualreader-cloud-" + provider + "-section");
+      if (section) section.hidden = native?.value !== provider;
+    }
+  };
+  if (native) native.value = getNativePDFBackend();
+  onPreferenceEdit(native, ({ value }) => {
+    setNativePDFBackend(value === "docling" || isCloudParser(value) ? value : "pdfjs");
+    refreshParserFields();
+  });
+  refreshParserFields();
+  for (const provider of CLOUD_PROVIDERS) {
+    bindTextPreference(doc, "bilingualreader-cloud-" + provider + "-key",
+      getCloudKey(provider), (value) => {
+        const key = value.trim();
+        if (key === getCloudKey(provider)) return;
+        setCloudKey(provider, key);
+        if (provider === "mineru") {
+          setFeedback(doc, "mineru", key ? "Token 已自动保存 · 可点击验证" : "Token 已清除");
+        }
+      });
+    bindTextPreference(doc, "bilingualreader-cloud-" + provider + "-model",
+      getCloudModel(provider), (value) => {
+        if (value.trim() === getCloudModel(provider)) return;
+        setCloudModel(provider, value);
+        if (provider === "mineru") setFeedback(doc, "mineru", "模型已自动保存 · 可点击验证");
+      });
+  }
+
+  bindTextPreference(doc, "bilingualreader-docling-url", getDoclingEndpoint(), setDoclingEndpoint);
+  bindTextPreference(doc, "bilingualreader-ollama-url", getOllamaURL(), (value) => {
+    if (value !== getOllamaURL()) setFeedback(doc, "engine");
+    setOllamaURL(value);
+  });
+  bindTextPreference(doc, "bilingualreader-ollama-model", getOllamaModel(), (value) => {
+    if (value !== getOllamaModel()) setFeedback(doc, "engine");
+    setOllamaModel(value);
+  });
+
+  const exportLayout = getElement<HTMLSelectElement>(doc, "bilingualreader-export-layout");
+  if (exportLayout) exportLayout.value = getPDFExportLayout();
+  onPreferenceEdit(exportLayout, ({ value }) => setPDFExportLayout(value));
+
+  const allPages = getElement<HTMLInputElement>(doc, "bilingualreader-translate-all-pages");
+  const nonReferences = getElement<HTMLInputElement>(doc, "bilingualreader-translate-non-references");
+  const skipPages = getElement<HTMLInputElement>(doc, "bilingualreader-skip-last-pages");
+  const updatePageRange = () => {
+    const all = getTranslateAllPages();
+    if (allPages) allPages.checked = all;
+    if (nonReferences) nonReferences.checked = !all;
+    if (skipPages) skipPages.disabled = all;
+  };
+  updatePageRange();
+  for (const [input, all] of [[allPages, true], [nonReferences, false]] as const) {
+    onPreferenceEdit(input, ({ checked }) => {
+      if (!checked) return;
+      setTranslateAllPages(all);
+      updatePageRange();
+    }, false);
+  }
+
+  const numberPreferences = [
+    ["skip-last-pages", () => getSkipLastPages() || DEFAULT_SKIP_LAST_PAGES, setSkipLastPages],
+    ["cache-max-entries", getCacheMaxEntries, (count: number) => {
+      if (getCacheMaxEntries() === count) return;
+      setCacheMaxEntries(count);
+      enforceTranslationCacheLimit();
+      updateCacheStatus(doc);
+    }],
+    ["max-concurrent", getMaxConcurrent, setMaxConcurrent],
+    ["request-gap", getRequestGapMs, setRequestGapMs],
+    ["max-chars", getMaxCharsPerRequest, setMaxCharsPerRequest],
+    ["max-batch-paragraphs", getMaxBatchParagraphs, setMaxBatchParagraphs],
+    ["max-errors", getMaxConsecutiveErrors, setMaxConsecutiveErrors],
+    ["request-timeout", getRequestTimeoutMs, setRequestTimeoutMs],
+  ] as const;
+  for (const [id, get, set] of numberPreferences) {
+    const input = getElement<HTMLInputElement>(doc, "bilingualreader-" + id);
+    if (input) input.value = String(get());
+    onPreferenceEdit(input, (control) => {
+      if (!control.validity.valid || !Number.isFinite(control.valueAsNumber)) {
+        throw new Error(`请输入 ${control.min} 到 ${control.max} 之间的整数。`);
+      }
+      set(control.valueAsNumber);
+    // Commit cache size after editing so intermediary digits cannot evict entries.
+    }, id !== "cache-max-entries");
+  }
 
   updateBackendVisibility(doc);
   updatePDFTranslateStatus(doc);
   updateCacheStatus(doc);
-  registerProjectLink(doc);
+  registerExternalLink(doc, "bilingualreader-github-link", PROJECT_URL);
+  registerExternalLink(doc, "bilingualreader-mineru-link",
+    "https://mineru.net/apiManage/docs?openApplyModal=true");
+  const dictionaryNote = getElement<HTMLElement>(doc, "bilingualreader-dictionary-note");
+  if (dictionaryNote) {
+    dictionaryNote.textContent = "词典类服务仅支持查词：" +
+      DICTIONARY_ONLY_SERVICES.map((name) => name + "（不推荐）").join("、") + "。";
+  }
+  if (getCloudKey("mineru")) setFeedback(doc, "mineru", "已保存 Token · 可点击验证");
 
-  engine?.addEventListener("change", () => {
-    updateBackendVisibility(doc);
-    setStatus(doc, "翻译后端已修改，点击“保存设置”后生效。");
-  });
+  getElement<HTMLButtonElement>(doc, "bilingualreader-test-mineru")?.addEventListener(
+    "click", () => { void testMinerU(doc); },
+  );
 
-  getElement<HTMLButtonElement>(doc, "bilingualreader-save")?.addEventListener("click", () => {
-    saveSettings(doc);
-  });
+  getElement<HTMLButtonElement>(doc, "bilingualreader-test-service")?.addEventListener(
+    "click",
+    () => { void testSelectedService(doc); },
+  );
+
+  getElement<HTMLButtonElement>(doc, "bilingualreader-test-docling")?.addEventListener(
+    "click",
+    () => { void testDocling(doc); },
+  );
 
   getElement<HTMLButtonElement>(doc, "bilingualreader-test-ollama")?.addEventListener(
     "click",
