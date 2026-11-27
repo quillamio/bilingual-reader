@@ -218,8 +218,7 @@
       style="width: 110px; padding: 2px 6px"
     />
     <html:span style="margin-left: 10px; max-width: 520px"
-      >默认 6。仅兼容后端和 Ollama 使用多段合并；所有内置引擎逐段翻译。设为 1
-      可关闭合并。</html:span
+      >为确保失败段落可独立重试和持久化，本版本统一逐段请求；旧合并设置保留，暂不参与任务调度。</html:span
     >
   </hbox>
 
@@ -274,10 +273,12 @@
       style="width: 110px; padding: 2px 6px"/>
     <html:span style="margin-left: 10px">默认 1500，填 0 可关闭缓存。</html:span>
   </hbox>
+  <html:label><html:input id="bilingualreader-checkpoint-enabled" type="checkbox"/> 启用段落级断点续传（独立于普通缓存）</html:label>
+  <html:p style="max-width: 760px">本地保存精确原文、译文、引擎标记与段落状态，以便重启后恢复。默认启用；敏感论文可关闭。最多保存 32 个附件，每个附件最多 200 万字符，不自动覆盖旧记录。关闭后不再读写断点；清除按钮可删除已有断点记录。请先停止运行中的任务再清除。</html:p>
   <html:p id="bilingualreader-cache-status"></html:p>
   <hbox align="center">
     <html:button id="bilingualreader-clear-cache" type="button" style="padding: 2px 12px"
-      >清除翻译缓存</html:button
+      >清除翻译缓存及断点记录</html:button
     >
     <html:span style="margin-left: 10px; max-width: 560px"
       >达到段数或存储上限时，优先清理最久未使用的译文。</html:span

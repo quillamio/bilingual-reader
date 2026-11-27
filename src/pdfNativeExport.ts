@@ -5,9 +5,9 @@
 import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getMixedRouteCacheTag,
   getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, type PDFExportLayout } from "./settings";
 import { saveCachedTranslation } from "./translationCache";
-import { buildBatchPayload, packBatchItems, parseBatchResult,
-  type BatchInput } from "./translationPipeline";
-import { translateTextRouted, loadRoutedCachedTranslation } from "./bilingualReader";
+import { runParagraphPass } from "./translationCheckpoint";
+import { openTranslationCheckpoint } from "./zoteroCheckpoint";
+import { translateTextRouted, loadRoutedCachedResponse } from "./bilingualReader";
 import { TranslationCancelledError } from "./translationRouter";
 import { isScientificPreserveOnly, validScientificTranslation, splitScientificText } from "./scientificText";
 import { printHTMLToPDF, importExportedPDF } from "./readerUI";
@@ -76,15 +76,16 @@ export async function translateNativeDocument(
   document: NativeDocument,
   itemID: number,
   itemKey: string,
-  onProgress?: (done: number, total: number) => void,
+  onProgress?: (done: number, total: number, status?: string) => void,
   isCancelled?: () => boolean, task?: PDFExportTask,
+  seed?: ReadonlyMap<string, string>,
 ): Promise<Map<string, string>> {
   task?.throwIfCancelled();
   const engine = getEngine();
-  if (isManagedService(engine)) assertServiceConfigured(engine);
+  const checkpoint = openTranslationCheckpoint(itemID, itemKey, engine);
   const engineTag = getCacheEngineTag(undefined, engine);
   const cutoff = getTranslationPageCount(document.pages.length);
-  const pending: Array<NativeBlock & BatchInput> = [];
+  const pending: NativeBlock[] = [];
   const translated = new Map<string, string>();
   const sourcePages = getTranslateAllPages() ? document.pages : withoutBibliography(document.pages);
   for (const page of sourcePages) {
@@ -94,55 +95,43 @@ export async function translateNativeDocument(
       const text = block.source === "pdfjs" && block.lineTexts?.length
         ? joinPDFLines(block.lineTexts) : block.text;
       if (isScientificPreserveOnly(text)) { translated.set(block.id, text); continue; }
-      const cached = loadRoutedCachedTranslation(itemKey, text, engine, result => isUntranslated(text, result));
+      const entry = checkpoint.get(text, value => !isUntranslated(text, value));
+      const previous = seed?.get(block.id);
+      const cachedResponse = entry?.state === "done" ? undefined : loadRoutedCachedResponse(itemKey, text, engine, result => isUntranslated(text, result));
+      if (cachedResponse) checkpoint.record(text, { text: cachedResponse.text, tag: cachedResponse.engineTag });
+      const cached = (entry?.state === "done" ? entry.text : undefined) || cachedResponse?.text ||
+        (previous && !isUntranslated(text, previous) ? previous : undefined);
       if (cached) translated.set(block.id, cached);
       else pending.push({ ...block, text });
     }
   }
-  const jobs = packBatchItems(pending, getMaxCharsPerRequest(), isManagedService(engine) ? 1 : 4);
-  let done = 0;
-  let consecutiveFailures = 0;
-  onProgress?.(0, pending.length);
-  for (const job of jobs) {
-    if (isCancelled?.() || task?.cancelled) throw new PDFExportCancelledError();
-    let batchResults: string[] | null = null;
-    let batchTag = engineTag;
-    if (job.length > 1) {
-      try {
-        const batch = await translateTextRouted(buildBatchPayload(job), itemID, engine, task, true);
-        batchResults = parseBatchResult(batch.text, job.length);
-        batchTag = batch.engineTag;
-      } catch (error) {
-        // The old request may still be running; do not launch another one on timeout.
-        if (error instanceof TranslationCancelledError || task?.cancelled) throw new PDFExportCancelledError();
-        if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
-        Zotero.logError(error as Error);
-      }
-    }
-    for (const [index, block] of job.entries()) {
-      if (isCancelled?.() || task?.cancelled) throw new PDFExportCancelledError();
-      try {
-        const fromBatch = batchResults?.[index];
-        const { text: result, tag } = fromBatch && !isUntranslated(block.text, fromBatch)
-          ? { text: fromBatch, tag: batchTag }
-          : await translateSegment(block.text, itemID, engine, task);
-        translated.set(block.id, result);
-        saveCachedTranslation(itemKey, block.text, result, tag || engineTag, value => isUntranslated(block.text, value));
-        consecutiveFailures = 0;
-      } catch (error) {
-        if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
-        Zotero.logError(error as Error);
-        consecutiveFailures++;
-        if (consecutiveFailures >= getMaxConsecutiveErrors()) {
-          throw new Error("连续翻译失败，停止生成不完整文件：" +
-            String((error as Error)?.message || error));
-        }
-      }
-    }
-    done += job.length;
-    if (isCancelled?.() || task?.cancelled) throw new PDFExportCancelledError();
-    onProgress?.(done, pending.length);
+  const recovered = translated.size;
+  try {
+    await runParagraphPass({
+      items: pending,
+      maxConsecutiveFailures: getMaxConsecutiveErrors(),
+      cancelled: () => Boolean(isCancelled?.() || task?.cancelled),
+      isCancellation: error => error instanceof PDFExportCancelledError || error instanceof TranslationCancelledError,
+      translate: async block => {
+        if (isManagedService(engine)) assertServiceConfigured(engine);
+        return translateSegment(block.text, itemID, engine, task);
+      },
+      success: (block, result) => {
+        translated.set(block.id, result.text);
+        checkpoint.record(block.text, result);
+        try { saveCachedTranslation(itemKey, block.text, result.text, result.tag || engineTag, value => isUntranslated(block.text, value)); }
+        catch (_) { Zotero.logError(new Error("普通译文缓存写入失败，保留当前译文。")); }
+      },
+      failure: block => { checkpoint.record(block.text); },
+      progress: (done, total, failed, paused) => onProgress?.(done + recovered, total + recovered,
+        " · 已恢复/保留 " + recovered + " · 失败 " + failed + (paused ? " · 已暂停，保留已有译文" : "") +
+        (checkpoint.warning() ? " · 断点保存异常" : "")),
+    });
+  } catch (error) {
+    if (task?.cancelled || isCancelled?.() || error instanceof TranslationCancelledError) throw new PDFExportCancelledError();
+    throw error;
   }
+  if (checkpoint.warning()) notify(null, checkpoint.warning());
   task?.throwIfCancelled();
   return translated;
 }
@@ -188,7 +177,7 @@ export async function supplementReadingPDFPages(
   const translated = await translateNativeDocument({
     ...physical, pages: targets.map(page => ({ ...page, blocks: page.blocks.filter(block => !reused.has(block.id)) })),
   }, attachment.id, String(attachment.key || attachment.id),
-  (done, total) => progress(button, `补译遗漏段落：${done}/${total}`), undefined, task);
+  (done, total, status) => progress(button, `补译遗漏段落：${done}/${total}` + (status || "")), undefined, task);
 
   let missingCount = 0;
   const missingPages: number[] = [];
@@ -213,7 +202,7 @@ export async function supplementReadingPDFPages(
   return {
     pages: fullyPositioned,
     missing: missingCount
-      ? `第 ${missingPages.join("、")} 页共有 ${missingCount} 个文字块未完成翻译，右侧会保留这些块的原文。`
+      ? `第 ${missingPages.join("、")} 页共有 ${missingCount} 个文字块未完成翻译，右侧会保留这些块的原文。再次导出可恢复断点并补译。`
       : "",
   };
 }
@@ -221,6 +210,7 @@ export async function supplementReadingPDFPages(
 /** Keep the original on the left and print each positioned translation on the right. */
 export async function saveSideBySidePDF(
   reader: any, attachment: Zotero.Item, pages: PositionedPDFPage[], button: HTMLButtonElement | null, task?: PDFExportTask,
+  partial = false,
 ): Promise<string> {
   const stamp = Date.now() + "-" + Math.random().toString(36).slice(2);
   const combined = Zotero.getTempDirectory();
@@ -284,7 +274,7 @@ export async function saveSideBySidePDF(
     const paired = await composeSideBySidePDF(original, transcripts(), pages.length, task);
     if (!placed && !onContinuation) throw new Error("没有可导出的译文。");
     await writePDFFile(combined, paired, task);
-    await importExportedPDF(combined, attachment, "左右对照翻译", task);
+    await importExportedPDF(combined, attachment, partial ? "左右对照翻译（部分译文）" : "左右对照翻译", task);
     return onContinuation ? `\n${onContinuation} 段无法安全放回原位，已加入对应原页的译文续页。` : "";
   } finally {
     try { if (combined.exists()) combined.remove(false); } catch (_) { /* Temp only */ }
@@ -386,16 +376,18 @@ export async function exportNativePDFBilingual(
       };
     }
     if (!getTranslateAllPages()) parsed = { ...parsed, pages: withoutBibliography(parsed.pages) };
-    const translated = fallbackReading?.translations ?? await translateNativeDocument(
+    const translated = await translateNativeDocument(
       parsed, itemID, String(attachment.key || itemID),
-      (done, total) => progress(button, parserStatus + " · 翻译 " + done + "/" + total), undefined, task,
+      (done, total, status) => progress(button, parserStatus + " · 翻译 " + done + "/" + total + (status || "")), undefined, task,
+      fallbackReading?.translations,
     );
     const cutoff = getTranslationPageCount(parsed.pages.length);
-    const missing = parsed.pages.reduce((sum, page) =>
-      sum + page.blocks.filter((block) =>
-        page.index < cutoff && canTranslate(block) && !translated.has(block.id)).length, 0);
-    if (missing && !confirm(reader, "有 " + missing +
-      " 个段落未完成翻译。是否导出当前结果？")) return;
+    const missingPages = parsed.pages.map(page => ({ page: page.index + 1, count: page.index < cutoff ? page.blocks.filter(block => canTranslate(block) && !translated.has(block.id)).length : 0 })).filter(page => page.count);
+    const missing = missingPages.reduce((sum, page) => sum + page.count, 0);
+    const complete = parsed.pages.some(page => page.blocks.some(block => translated.has(block.id) && !isScientificPreserveOnly(block.text)));
+    if (!complete) { notify(reader, "没有成功完成的正文译文。不会生成空白附件；请检查服务后再次导出恢复任务。"); return; }
+    if (missing && !confirm(reader, "第 " + missingPages.map(page => page.page).join("、") + " 页共有 " + missing +
+      " 个段落未完成翻译。已完成译文保留，稍后可再次导出补译。\n\n是否现在生成明确标记为「部分译文」的 PDF？")) return;
 
     if (sideBySide) {
       const note = await saveSideBySidePDF(reader, attachment, parsed.pages.map(page => ({
@@ -405,8 +397,8 @@ export async function exportNativePDFBilingual(
           const text = translated.get(block.id);
           return text ? [{ text, heading: block.type === "heading", rects: block.lineRects || [] }] : [];
         }),
-      })), button, task);
-      notify(reader, "左右对照导出成功。左侧为原始 PDF，右侧为原位译文。" + note + "\n" + parserStatus +
+      })), button, task, missing > 0);
+      notify(reader, (missing ? "已导出部分译文（" + missing + " 段未完成）。" : "左右对照导出成功。") + "左侧为原始 PDF，右侧为原位译文。" + note + "\n" + parserStatus +
         (parsed.warnings.length ? "\n提示：" + parsed.warnings.slice(0, 3).join("；") : ""));
       return;
     }
@@ -424,11 +416,11 @@ export async function exportNativePDFBilingual(
     try {
       progress(button, "正在打印上下对照译文…");
       await printHTMLToPDF(buildNativeBilingualHTML(exportPages, title, parsed.source), temp, undefined, task);
-      await importExportedPDF(temp, attachment, undefined, task);
+      await importExportedPDF(temp, attachment, missing ? "中英对照翻译（部分译文）" : undefined, task);
     } finally {
       try { if (temp.exists()) temp.remove(false); } catch (_) { /* Temp only */ }
     }
-    notify(reader, "上下对照导出成功。\n" + parserStatus +
+    notify(reader, (missing ? "已导出部分译文（" + missing + " 段未完成）。\n" : "上下对照导出成功。\n") + parserStatus +
       (parsed.warnings.length ? "\n提示：" + parsed.warnings.slice(0, 3).join("；") : ""));
   } catch (error) {
     if (task?.cancelled || error instanceof PDFExportCancelledError) return;

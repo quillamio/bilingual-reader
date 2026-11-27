@@ -3,7 +3,6 @@ import {
   DEFAULT_OLLAMA_URL,
   getCacheEngineTag,
   getEngine,
-  getMaxBatchParagraphs,
   getMaxCharsPerRequest,
   getMaxConcurrent,
   getMaxConsecutiveErrors,
@@ -27,12 +26,8 @@ import {
   loadCachedTranslation,
   saveCachedTranslation,
 } from "./translationCache";
-import {
-  buildBatchPayload,
-  packBatchItems,
-  parseBatchResult,
-  type BatchInput,
-} from "./translationPipeline";
+import { runParagraphPass } from "./translationCheckpoint";
+import { openTranslationCheckpoint, type ZoteroCheckpoint } from "./zoteroCheckpoint";
 import { CancellationToken } from "./cancellationToken";
 import { isScientificPreserveOnly, validScientificTranslation, splitScientificText, translateScientificRequest } from "./scientificText";
 import { TranslationRouter, TranslationCancelledError, translationHTTPError, type RouterCancellation } from "./translationRouter";
@@ -70,10 +65,6 @@ const runStates = new WeakMap<object, RunState>();
 interface TranslationResponse {
   text: string;
   engineTag: string;
-}
-
-interface TranslationJobItem extends BatchInput {
-  paragraphIndex: number;
 }
 
 function isFailureText(text: string): boolean {
@@ -229,14 +220,20 @@ export async function translateTextRouted(
   return translateScientificRequest(text, route, getMaxCharsPerRequest(), () => Boolean(cancellation?.cancelled));
 }
 
+export function loadRoutedCachedResponse(
+  itemKey: string, text: string, engine: TranslationEngine, invalid: (value: string) => boolean,
+): TranslationResponse | undefined {
+  for (const tag of getRoutedCacheTags(engine)) {
+    const result = loadCachedTranslation(itemKey, text, tag, invalid);
+    if (result) return { text: result, engineTag: tag };
+  }
+  return undefined;
+}
+
 export function loadRoutedCachedTranslation(
   itemKey: string, text: string, engine: TranslationEngine, invalid: (value: string) => boolean,
 ): string | undefined {
-  for (const tag of getRoutedCacheTags(engine)) {
-    const result = loadCachedTranslation(itemKey, text, tag, invalid);
-    if (result) return result;
-  }
-  return undefined;
+  return loadRoutedCachedResponse(itemKey, text, engine, invalid)?.text;
 }
 
 async function translateTextLimited(
@@ -466,8 +463,8 @@ function getPageIndexForRef(structure: any, refPath: string): number | undefined
 function collectParagraphs(
   doc: Document,
   itemKey: string,
-  engineTag: string,
   structure: any,
+  checkpoint: ZoteroCheckpoint,
 ): { paragraphs: ReaderParagraph[]; excluded: boolean } {
   const selector = [
     "#sdt-content p[data-ref-path]",
@@ -503,12 +500,15 @@ function collectParagraphs(
       continue;
     }
 
+    const checkpointEntry = checkpoint.get(sourceText, value => validScientificTranslation(sourceText, value));
+    const cached = checkpointEntry?.state === "done" ? undefined : loadRoutedCachedResponse(itemKey, sourceText, getEngine(), value => !validScientificTranslation(sourceText, value));
+    if (cached) checkpoint.record(sourceText, { text: cached.text, tag: cached.engineTag });
     paragraphs.push({
       refPath,
       sourceText,
       sourceElement: element,
       pageIndex,
-      translation: loadCachedTranslation(itemKey, sourceText, engineTag, value => !validScientificTranslation(sourceText, value)) || loadRoutedCachedTranslation(itemKey, sourceText, getEngine(), value => !validScientificTranslation(sourceText, value)) || "",
+      translation: (checkpointEntry?.state === "done" ? checkpointEntry.text : undefined) || cached?.text || "",
     });
   }
 
@@ -617,6 +617,7 @@ async function translateParagraphs(
   generation: number,
   engine: TranslationEngine,
   engineTag: string,
+  checkpoint: ZoteroCheckpoint,
 ): Promise<void> {
   const maxErrors = getMaxConsecutiveErrors();
   const freeService = getServiceDefinition(engine)?.group === "free";
@@ -634,126 +635,48 @@ async function translateParagraphs(
       (viewportDistances.get(b) ?? Number.MAX_SAFE_INTEGER),
   );
 
-  if (!pendingIndexes.length) return;
+  if (!pendingIndexes.length) { if (checkpoint.warning()) showError(reader, checkpoint.warning()); return; }
 
   const cancellation = getRunCancellation(reader, generation);
-  const jobItems: TranslationJobItem[] = pendingIndexes.map((paragraphIndex) => ({
-    id: String(paragraphIndex),
-    paragraphIndex,
-    text: paragraphs[paragraphIndex].sourceText,
-  }));
-  // Free web endpoints may modify the BRSEG markers: translate one paragraph at a time.
-  const jobs = packBatchItems(
-    jobItems,
-    getMaxCharsPerRequest(),
-    isManagedService(engine) ? 1 : getMaxBatchParagraphs(),
-  );
-
-  let cursor = 0;
-  let completed = 0;
-  let failureStreak = 0;
-  let aborted = false;
-  const request = async (text: string, batch = false): Promise<TranslationResponse> => {
-    if (!isCurrentRun(reader, generation, doc)) throw new RunCancelledError();
-    return translateTextRouted(text, itemID, engine, cancellation, batch);
-  };
-
-  const translateJob = async (
-    job: TranslationJobItem[],
-  ): Promise<Array<{ paragraphIndex: number; response: TranslationResponse }>> => {
-    if (job.length === 1) {
-      const response = await translateTextLimited(job[0].text, request, engine);
-      return [{ paragraphIndex: job[0].paragraphIndex, response }];
-    }
-
-    let batchResponse: TranslationResponse | undefined;
-    try { batchResponse = await request(buildBatchPayload(job), true); }
-    catch (error) { if (isCancellationError(error)) throw error; }
-    const parsed = batchResponse ? parseBatchResult(batchResponse.text, job.length) : null;
-    if (parsed && batchResponse && parsed.every((value, index) => validScientificTranslation(job[index].text, value))) {
-      return job.map((item, index) => ({
-        paragraphIndex: item.paragraphIndex,
-        response: { text: parsed[index], engineTag: batchResponse!.engineTag },
-      }));
-    }
-
-    // Some engines translate or remove structural markers. Retrying these few
-    // items individually is slower, but guarantees paragraph alignment.
-    const fallback: Array<{ paragraphIndex: number; response: TranslationResponse }> = [];
-    for (const item of job) {
-      fallback.push({
-        paragraphIndex: item.paragraphIndex,
-        response: await translateTextLimited(item.text, request, engine),
-      });
-    }
-    return fallback;
-  };
-
-  const worker = async () => {
-    while (!aborted && isCurrentRun(reader, generation, doc)) {
-      const slot = cursor++;
-      if (slot >= jobs.length) return;
-      const job = jobs[slot];
-
-      for (const item of job) {
-        const block = ensureTranslationBlock(doc, paragraphs[item.paragraphIndex]);
-        if (!block) continue;
-        block.dataset.state = "loading";
-        block.textContent = `正在翻译…（已完成 ${completed}/${pendingIndexes.length}）`;
+  const result = await runParagraphPass({
+    items: pendingIndexes,
+    concurrency,
+    maxConsecutiveFailures: maxErrors,
+    cancelled: () => cancellation.cancelled || !isCurrentRun(reader, generation, doc),
+    isCancellation: error => isCancellationError(error) || isDeadObjectError(error),
+    translate: async paragraphIndex => {
+      const paragraph = paragraphs[paragraphIndex];
+      const block = ensureTranslationBlock(doc, paragraph);
+      if (block) { block.dataset.state = "loading"; block.textContent = "正在翻译或补译…"; }
+      return translateTextLimited(paragraph.sourceText, text => {
+        if (!isCurrentRun(reader, generation, doc)) throw new RunCancelledError();
+        if (isManagedService(engine)) assertServiceConfigured(engine);
+        return translateTextRouted(text, itemID, engine, cancellation);
+      }, engine);
+    },
+    success: (paragraphIndex, response) => {
+      const paragraph = paragraphs[paragraphIndex];
+      paragraph.translation = response.text;
+      checkpoint.record(paragraph.sourceText, { text: response.text, tag: response.engineTag || engineTag });
+      try { saveCachedTranslation(itemKey, paragraph.sourceText, response.text, response.engineTag || engineTag,
+        value => !validScientificTranslation(paragraph.sourceText, value)); }
+      catch (_) { Zotero.logError(new Error("普通译文缓存写入失败，保留当前译文。")); }
+      if (paragraph.block?.parentNode) {
+        paragraph.block.dataset.state = "done";
+        paragraph.block.textContent = response.text;
       }
-
-      try {
-        const results = await translateJob(job);
-        if (!isCurrentRun(reader, generation, doc)) return;
-
-        for (const { paragraphIndex, response } of results) {
-          const paragraph = paragraphs[paragraphIndex];
-          paragraph.translation = response.text;
-          saveCachedTranslation(
-            itemKey,
-            paragraph.sourceText,
-            response.text,
-            response.engineTag || engineTag,
-            value => !validScientificTranslation(paragraph.sourceText, value),
-          );
-
-          const liveBlock = paragraph.block;
-          if (liveBlock?.parentNode) {
-            liveBlock.dataset.state = "done";
-            liveBlock.textContent = response.text;
-          }
-          completed += 1;
-        }
-        failureStreak = 0;
-      } catch (error: any) {
-        if (isCancellationError(error)) return;
-        if (isDeadObjectError(error)) {
-          aborted = true;
-          cancellation.cancel();
-          return;
-        }
-        if (!isCurrentRun(reader, generation, doc)) return;
-
-        failureStreak += 1;
-        for (const item of job) {
-          const liveBlock = paragraphs[item.paragraphIndex].block;
-          if (liveBlock?.parentNode) {
-            liveBlock.dataset.state = "error";
-            liveBlock.textContent = `翻译失败：${error?.message || String(error)}`;
-          }
-        }
-
-        if (failureStreak >= maxErrors) {
-          aborted = true;
-          markUnfinishedPaused(doc, paragraphs);
-          cancellation.cancel();
-          return;
-        }
+    },
+    failure: paragraphIndex => {
+      const paragraph = paragraphs[paragraphIndex];
+      checkpoint.record(paragraph.sourceText);
+      if (paragraph.block?.parentNode) {
+        paragraph.block.dataset.state = "error";
+        paragraph.block.textContent = "翻译失败：已保留任务记录，点击 🔄 补译。";
       }
-    }
-  };
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker()));
+    },
+  });
+  if (result.paused) markUnfinishedPaused(doc, paragraphs);
+  if (checkpoint.warning()) showError(reader, checkpoint.warning());
 }
 
 async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
@@ -787,7 +710,8 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
 
     const engine = getEngine();
     const engineTag = getCacheEngineTag(undefined, engine);
-    const { paragraphs, excluded } = collectParagraphs(doc, itemKey, engineTag, getSDTStructure(reader));
+    const checkpoint = openTranslationCheckpoint(itemID, itemKey, engine);
+    const { paragraphs, excluded } = collectParagraphs(doc, itemKey, getSDTStructure(reader), checkpoint);
     if (!paragraphs.length && excluded) {
       showError(reader, "当前翻译范围内没有可翻译的段落。");
       return;
@@ -795,8 +719,6 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
     if (!paragraphs.length) {
       throw new ReadingModeUnavailable("当前阅读模式中没有检测到可翻译的正文段落。");
     }
-    if (isManagedService(engine)) assertServiceConfigured(engine);
-
     installStyles(doc);
     observeReadingLayout(getActiveSDTView(reader), doc, reader);
     for (const paragraph of paragraphs) {
@@ -804,7 +726,7 @@ async function prepareAndRun(reader: any, refresh: boolean): Promise<void> {
     }
 
     root.dataset.bilingualReaderRunning = "true";
-    await translateParagraphs(reader, doc, itemID, itemKey, paragraphs, generation, engine, engineTag);
+    await translateParagraphs(reader, doc, itemID, itemKey, paragraphs, generation, engine, engineTag, checkpoint);
   } catch (error: any) {
     if (runStates.get(reader)?.generation === generation &&
         !isDeadObjectError(error) && !isCancellationError(error)) {

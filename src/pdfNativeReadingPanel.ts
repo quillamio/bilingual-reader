@@ -3,7 +3,8 @@ import { getNormalPDFProxy, parseNormalPDFWithPDFJS } from "./pdfNativeRuntime";
 import { getCloudKey, parseWithCloudProvider } from "./pdfCloudParsers";
 import { readOriginalAttachment } from "./pdfVectorExport";
 import { translateNativeDocument } from "./pdfNativeExport";
-import { describePDFParser, type NativeDocument } from "./pdfNativeModel";
+import { describePDFParser, withoutBibliography, type NativeDocument } from "./pdfNativeModel";
+import { getTranslateAllPages, getTranslationPageCount } from "./settings";
 
 export interface MinerUReadingResult {
   document: NativeDocument;
@@ -69,7 +70,10 @@ function paintParagraphs(
   doc: Document, target: HTMLElement, document: NativeDocument,
 ): Map<string, HTMLElement> {
   const destinations = new Map<string, HTMLElement>();
-  for (const page of document.pages) {
+  const pages = getTranslateAllPages() ? document.pages : withoutBibliography(document.pages);
+  const cutoff = getTranslationPageCount(document.pages.length);
+  for (const page of pages) {
+    if (page.index >= cutoff) continue;
     const section = doc.createElement("section"); section.className = "page";
     const heading = doc.createElement("h4");
     heading.textContent = "原始 PDF 第 " + (page.index + 1) + " 页";
@@ -120,8 +124,8 @@ export async function openMinerUReadingFallback(reader: any): Promise<void> {
     ui.status.textContent = parserStatus + " · 正在翻译…";
     const translations = await translateNativeDocument(
       parsed, attachment.id, attachment.key,
-      (done, total) => {
-        if (!session.closed) ui.status.textContent = parserStatus + " · 翻译 " + done + "/" + total;
+      (done, total, status) => {
+        if (!session.closed) ui.status.textContent = parserStatus + " · 翻译 " + done + "/" + total + (status || "");
       },
       () => session.closed,
     );
@@ -130,7 +134,8 @@ export async function openMinerUReadingFallback(reader: any): Promise<void> {
     for (const [id, element] of destination) {
       element.textContent = translations.get(id) || "〔未翻译〕";
     }
-    ui.status.textContent = "已完成 · " + parserStatus + " · " + translations.size + " 段译文";
+    const missing = [...destination.keys()].filter(id => !translations.has(id)).length;
+    ui.status.textContent = (missing ? "部分完成（" + missing + " 段未完成，点击 🔄 可恢复）" : "已完成") + " · " + parserStatus + " · " + translations.size + " 段译文";
   } catch (error) {
     if (session.closed) return;
     Zotero.logError(error as Error);

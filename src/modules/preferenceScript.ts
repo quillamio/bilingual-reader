@@ -34,6 +34,7 @@ import {
   setSkipLastPages,
 } from "../settings";
 import { clearTranslationCache, enforceTranslationCacheLimit, getTranslationCacheStats } from "../translationCache";
+import { clearTranslationCheckpoints, getCheckpointDocumentCount, getCheckpointEnabled, setCheckpointEnabled } from "../zoteroCheckpoint";
 import {
   SERVICE_CATALOG,
   getServiceDefinition,
@@ -340,13 +341,14 @@ function updateCacheStatus(doc: Document): void {
   if (!status) return;
   const stats = getTranslationCacheStats();
   const sizeMiB = ((stats.chars * 2) / (1024 * 1024)).toFixed(1);
-  status.textContent = `缓存 ${stats.entries} 段，约 ${sizeMiB} MiB（按 UTF-16 估算）。`;
+  status.textContent = `缓存 ${stats.entries} 段，约 ${sizeMiB} MiB（按 UTF-16 估算）；断点记录 ${getCheckpointDocumentCount()} 个附件。`;
 }
 
 function clearCache(doc: Document): void {
   const removed = clearTranslationCache();
+  const checkpoints = clearTranslationCheckpoints();
   const sizeMiB = ((removed.chars * 2) / (1024 * 1024)).toFixed(1);
-  setStatus(doc, `已清除 ${removed.entries} 个缓存项，约 ${sizeMiB} MiB。`);
+  setStatus(doc, `已清除 ${removed.entries} 个缓存项，约 ${sizeMiB} MiB，以及 ${checkpoints} 个附件的断点记录。`);
   updateCacheStatus(doc);
 }
 
@@ -494,6 +496,9 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
     }, id !== "cache-max-entries");
   }
 
+  const checkpointEnabled = getElement<HTMLInputElement>(doc, "bilingualreader-checkpoint-enabled");
+  if (checkpointEnabled) checkpointEnabled.checked = getCheckpointEnabled();
+  onPreferenceEdit(checkpointEnabled, control => setCheckpointEnabled(control.checked));
   updateBackendVisibility(doc);
   updatePDFTranslateStatus(doc);
   updateCacheStatus(doc);
@@ -531,7 +536,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   getElement<HTMLButtonElement>(doc, "bilingualreader-clear-cache")?.addEventListener(
     "click",
     () => {
-      clearCache(doc);
+      try { clearCache(doc); } catch (_) { setStatus(doc, "部分本地记录清除失败，请重试。"); }
     },
   );
 }

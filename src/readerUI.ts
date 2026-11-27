@@ -50,7 +50,7 @@ function showMessage(reader: any, message: string): void {
 
 function confirmMessage(reader: any, message: string): boolean {
   const win = getDialogWindow(reader);
-  return win?.confirm ? Boolean(win.confirm(message)) : true;
+  return typeof win?.confirm === "function" && Boolean(win.confirm(message));
 }
 
 function applyEmojiButtonStyle(button: HTMLButtonElement): void {
@@ -568,9 +568,9 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
     try {
       const { supplementReadingPDFPages, saveSideBySidePDF } = await import("./pdfNativeExport");
       const result = await supplementReadingPDFPages(reader, sourceAttachment, pages, button, task);
-      if (result.missing && !confirmMessage(reader, result.missing + "\n\n仍要导出当前结果？")) return;
-      const note = await saveSideBySidePDF(reader, sourceAttachment, result.pages, button, task);
-      showMessage(reader, "左右对照导出成功。左侧为原始 PDF，右侧为原位译文。" +
+      if (result.missing && !confirmMessage(reader, result.missing + "\n\n是否生成明确标记为「部分译文」的 PDF？")) return;
+      const note = await saveSideBySidePDF(reader, sourceAttachment, result.pages, button, task, Boolean(result.missing));
+      showMessage(reader, (result.missing ? "已导出部分译文。" : "左右对照导出成功。") + "左侧为原始 PDF，右侧为原位译文。" +
         (result.missing ? "\n" + result.missing : "") + note);
     } catch (error) {
       if (error instanceof PDFExportCancelledError || task?.cancelled) return;
@@ -601,7 +601,7 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
 
     const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
     await printHTMLToPDF(html, tempFile, undefined, task);
-    await importExportedPDF(tempFile, sourceAttachment, undefined, task);
+    await importExportedPDF(tempFile, sourceAttachment, unfinished > 0 ? "中英对照翻译（部分译文）" : undefined, task);
   } catch (error: any) {
     if (error instanceof PDFExportCancelledError || task?.cancelled) return;
     Zotero.logError(error as Error);
@@ -615,7 +615,7 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
     }
   }
 
-  showMessage(reader, "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。");
+  showMessage(reader, unfinished > 0 ? "已生成部分译文 PDF。未完成段落可点击 🔄 补译后重新导出。" : "已生成中英对照 PDF，并保存到当前文献的 Zotero 附件中。");
 }
 
 export function renderReaderExportButton(event: any): void {
