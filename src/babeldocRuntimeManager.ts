@@ -44,12 +44,13 @@ export function allowedRuntimeDownloadFinal(raw:string):boolean {
   catch(_){return false;}
 }
 export interface RuntimeMember {path:string;size:number;sha256:string;executable:boolean}
-export function runtimePathKey(path:unknown):string {
+export function runtimePathKey(path:unknown,target?:RuntimeTarget):string {
   if(typeof path!=="string"||path.length>500)throw new Error("运行包文件路径无效。");
   const parts=path.split("/");
   if(!(path==="launcher.py"||path==="requirements.lock"||(["python","site"].includes(parts[0])&&parts.length>1))||
     parts.some(p=>!p||p==="."||p===".."||/[. ]$/u.test(p)||/[\\:<>"|?*]/u.test(p)||Array.from(p).some(c=>c.charCodeAt(0)<32)||/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/iu.test(p)))throw new Error("运行包包含不安全路径。");
-  return path.normalize("NFC").toLowerCase();
+  const normalized=path.normalize("NFC");
+  return target==="linux-x64"?normalized:normalized.toLowerCase();
 }
 export function validateRuntimeMembers(manifest:unknown,entries:readonly {path:string;size:number}[],release:RuntimeRelease):RuntimeMember[] {
   runtimeID(release);
@@ -57,14 +58,14 @@ export function validateRuntimeMembers(manifest:unknown,entries:readonly {path:s
   if(data?.schema!==1||data.target!==release.target||data.version!==release.version.split("-r")[0]||!Array.isArray(data.files)||data.files.length!==release.fileCount||data.files.length>MAX_RUNTIME_FILES)throw new Error("运行包文件清单不匹配。");
   const map=new Map<string,{path:string;size:number}>();
   for(const entry of entries){
-    const key=entry.path==="runtime-files.json"?entry.path:runtimePathKey(entry.path);
+    const key=entry.path==="runtime-files.json"?entry.path:runtimePathKey(entry.path,release.target);
     if(map.has(key)||!Number.isSafeInteger(entry.size)||entry.size<0||entry.size>512*1024**2)throw new Error("运行包文件重复或容量异常。");
     map.set(key,entry);
   }
   if(map.size!==data.files.length+1||!map.has("runtime-files.json"))throw new Error("运行包存在额外文件。");
   const seen=new Set<string>();let total=0;
   const members:RuntimeMember[]=data.files.map((r:any)=>{
-    const key=runtimePathKey(r?.path);
+    const key=runtimePathKey(r?.path,release.target);
     if(seen.has(key)||!Number.isSafeInteger(r.size)||r.size<0||r.size>512*1024**2||map.get(key)?.size!==r.size||map.get(key)?.path!==r.path||!digest(r.sha256)||typeof r.executable!=="boolean")throw new Error("运行包文件校验清单无效。");
     seen.add(key);total+=r.size;
     return {path:r.path,size:r.size,sha256:r.sha256,executable:r.executable};

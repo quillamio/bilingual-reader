@@ -49,3 +49,11 @@ test("switch version requires re-verification; removing inactive version preserv
  await m.uninstall("0.7.0-r1-macos-arm64");assert.equal(x.current(),runtimeID(release));
  await assert.rejects(m.activate("0.7.2-r1-macos-arm64",control),/批准/);
 });
+
+test("Linux terminfo case-distinct files are valid only for Linux target",()=>{
+ const term=["2621A","2621a"].map(name=>({path:"python/share/terminfo/2/"+name,size:1,sha256:sha,executable:false}));
+ const extended=[...files,...term];
+ const linux={...release,target:"linux-x64",fileCount:5,unpackedSize:5};
+ assert.equal(validateRuntimeMembers({...manifest,target:"linux-x64",files:extended},[...extended,{path:"runtime-files.json",size:100}],linux).length,5);
+ assert.throws(()=>validateRuntimeMembers({...manifest,files:extended},[...extended,{path:"runtime-files.json",size:100}],{...release,fileCount:5,unpackedSize:5}));
+});

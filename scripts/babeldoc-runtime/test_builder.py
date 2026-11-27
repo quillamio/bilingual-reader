@@ -46,4 +46,6 @@ class BuilderTests(unittest.TestCase):
             self.assertEqual(meta["fileCount"],4)
             with self.assertRaises(ValueError):build.runtime_member("site/../outside")
             with self.assertRaises(ValueError):build.runtime_member("site/CON.txt")
+            self.assertNotEqual(build.runtime_member("python/share/terminfo/2/2621A","linux-x64"),build.runtime_member("python/share/terminfo/2/2621a","linux-x64"))
+            self.assertEqual(build.runtime_member("python/share/terminfo/2/2621A","macos-arm64"),build.runtime_member("python/share/terminfo/2/2621a","macos-arm64"))
 if __name__=="__main__":unittest.main()

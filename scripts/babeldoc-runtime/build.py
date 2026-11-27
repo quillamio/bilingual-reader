@@ -113,13 +113,16 @@ def pack_candidate(output,archive,wheels,lock):
         z.write(HERE/"launcher.py","launcher.py")
         for wheel in sorted(wheels.glob("*.whl")):z.write(wheel,"wheels/"+wheel.name)
 
-def runtime_member(name):
+def runtime_member(name,target=None):
     parts=name.split("/")
     if not parts or any(not p or p in (".","..") or p.endswith(("."," ")) or any(ord(c)<32 or c in '\\:<>"|?*' for c in p) or re.fullmatch(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?",p,re.I) for p in parts):
         raise ValueError("Unsafe runtime member: "+name)
     if not (name in ("launcher.py","requirements.lock") or parts[0] in ("python","site") and len(parts)>1):
         raise ValueError("Unexpected runtime member")
-    return unicodedata.normalize("NFC",name).casefold()
+    normalized=unicodedata.normalize("NFC",name)
+    # Linux terminfo legitimately contains distinct 2621A/2621a entries.
+    # Exclusive creation still rejects collisions on case-insensitive mounts.
+    return normalized if target=="linux-x64" else normalized.casefold()
 
 def pack_installable(root,output,target):
     # Materialize only regular files. Internal file symlinks are copied as
@@ -139,7 +142,7 @@ def pack_installable(root,output,target):
                 files.append(path)
     with zipfile.ZipFile(output,"x",compression=zipfile.ZIP_DEFLATED,compresslevel=3,allowZip64=True) as z:
         for path in sorted(files):
-            name=path.relative_to(root).as_posix();key=runtime_member(name)
+            name=path.relative_to(root).as_posix();key=runtime_member(name,target)
             actual=path.resolve(strict=True)
             if not actual.is_relative_to(root.resolve()) or not actual.is_file():raise ValueError("Unsafe runtime file: "+name)
             if key in seen:raise ValueError("Case-folded duplicate runtime file: "+name)
@@ -158,7 +161,7 @@ def unpack_installable(archive,dest,target):
         m=json.loads(z.read("runtime-files.json"));rows=m["files"]
         if m["target"]!=target or m["version"]!="0.7.1" or m["schema"]!=1:raise ValueError("Runtime manifest mismatch")
         names=[r["path"] for r in rows]
-        if len(names)!=len(set(map(runtime_member,names))) or len(z.namelist())!=len(names)+1 or set(z.namelist())!=set(names+["runtime-files.json"]):raise ValueError("Runtime file list mismatch")
+        if len(names)!=len(set(runtime_member(name,target) for name in names)) or len(z.namelist())!=len(names)+1 or set(z.namelist())!=set(names+["runtime-files.json"]):raise ValueError("Runtime file list mismatch")
         for r in rows:
             path=dest/r["path"];path.parent.mkdir(parents=True,exist_ok=True)
             if z.getinfo(r["path"]).file_size!=r["size"]:raise ValueError("Runtime file size mismatch")
