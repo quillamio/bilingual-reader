@@ -52,7 +52,8 @@ jobs:
       - name: Setup JS
         uses: zotero-plugin-dev/workflows/setup-js@main
       - run: npm run test:unit
-      - run: python3 -m py_compile scripts/docling_local_server.py
+      - run: python3 -m py_compile scripts/docling_local_server.py scripts/local_pdf_server.py
+      - run: python3 scripts/test_local_pdf_server.py
       - name: Prepare PDF render audit
         run: |
           mkdir -p "$GITHUB_WORKSPACE/pdf-regression"

@@ -1,3 +1,4 @@
+import { recordDiagnostic } from "./taskDiagnostics.ts";
 /** Shared, provider-scoped rate limits. Never bypass a provider's Retry-After. */
 export interface RouterCancellation {
   cancelled: boolean;
@@ -131,6 +132,7 @@ export class TranslationRouter {
           await this.acquire(lane, engine.gapMs, timeoutMs, cancellation);
           acquired = true;
           if (cancellation?.cancelled) { lane.busy = false; throw new TranslationCancelledError(); }
+          recordDiagnostic(engine.id,"request","start");
           try { options.onSwitch?.(engine.id); } catch (_) { /* Progress is best effort. */ }
           // Keep the lane occupied until the actual request settles, even if its caller cancels or times out.
           const raw = Promise.resolve().then(() => { check(cancellation); return options.request(engine.id); });
@@ -138,6 +140,7 @@ export class TranslationRouter {
           // Release only after the outcome is classified; on a timeout keep the lane until settlement.
           const value = await bounded(tracked, timeoutMs, cancellation);
           if (!options.validate(value)) throw new Error("无有效译文");
+          recordDiagnostic(engine.id,"request","success");
           lane.failures = 0; lane.blockedUntil = 0; lane.busy = false;
           return value;
         } catch (error) {
@@ -152,11 +155,13 @@ export class TranslationRouter {
           if (cancellation?.cancelled || error instanceof TranslationCancelledError) {
             const http = translationHTTPError(error);
             if (http?.status === 429) lane.blockedUntil = Math.max(lane.blockedUntil, Date.now() + Math.max(this.rateCooldown, http.retryAfterMs));
+            recordDiagnostic(engine.id,"request","cancelled");
             throw new TranslationCancelledError();
           }
-          if (error instanceof LaneUnavailable) { earliest = Math.min(earliest, error.until); failures.push(`${engine.id}:冷却中`); break; }
+          if (error instanceof LaneUnavailable) { recordDiagnostic(engine.id,"request","cooldown"); earliest = Math.min(earliest, error.until); failures.push(`${engine.id}:冷却中`); break; }
           const http = translationHTTPError(error);
           const status = http?.status;
+          recordDiagnostic(engine.id,"request","failure",status);
           lane.failures++;
           const backoff = Math.min(15 * 60 * 1000, this.baseBackoff * 2 ** Math.min(lane.failures - 1, 10));
           if (status === 429) {

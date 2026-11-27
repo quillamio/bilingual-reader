@@ -9,6 +9,7 @@ import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
 import { CLOUD_NAMES, normalizeMinerU, normalizeMarkdownPages, type CloudParser } from "./pdfCloudModel";
 
 import { parseDoc2X, parseMathpix, type ParseRequest } from "./externalPDFClient";
+import { recordDiagnostic } from "./taskDiagnostics";
 
 const PREF = "extensions.zotero.bilingualreader.native.cloud.";
 const MAX_BYTES = 30 * 1024 * 1024;
@@ -284,8 +285,13 @@ export async function parseWithCloudProvider(provider: CloudParser, bytes: Uint8
         verify();return result;
       };
       const control={check:verify,wait:(ms:number)=>waitForPDFExport(ms,task)};
-      const rows=provider==="doc2x"?await parseDoc2X(transport,bytes,key,model,control):await parseMathpix(transport,bytes,model,key,control);
-      return normalizeMarkdownPages(base,provider,rows);
+      recordDiagnostic(provider,"parse","start");
+      try {
+        const rows=provider==="doc2x"?await parseDoc2X(transport,bytes,key,model,control):await parseMathpix(transport,bytes,model,key,control);
+        const result=normalizeMarkdownPages(base,provider,rows);
+        recordDiagnostic(provider,"parse","success",undefined,result.pages.length);
+        return result;
+      } catch(error) {recordDiagnostic(provider,"parse",task?.cancelled?"cancelled":"failure");throw error;}
     }
   }
 }

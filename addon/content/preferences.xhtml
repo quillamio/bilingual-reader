@@ -68,7 +68,11 @@
   <html:details id="bilingualreader-pdf-troubleshooting">
     <html:summary style="cursor: pointer">解析和导出设置</html:summary>
     <html:p>整篇 PDF 导出服务（默认本地；不影响普通段落翻译）</html:p>
-    <html:select id="bilingualreader-export-provider"><html:option value="local">本地生成（默认）</html:option><html:option value="belindoc">BelinDoc 云端整篇翻译</html:option></html:select>
+    <html:select id="bilingualreader-export-provider"><html:option value="local">本地生成（默认）</html:option><html:option value="belindoc">BelinDoc 云端整篇翻译</html:option><html:option value="localpdf">BabelDOC / PDF2zh-next 本机桥接</html:option></html:select>
+    <html:label>本机翻译服务 <html:input id="bilingualreader-localpdf-url" type="text" placeholder="http://127.0.0.1:8787"/></html:label>
+    <html:label>访问令牌 <html:input id="bilingualreader-localpdf-token" type="password" autocomplete="off"/></html:label>
+    <html:label>本机引擎 <html:select id="bilingualreader-localpdf-engine"><html:option value="pdf2zh-next">PDF2zh-next</html:option><html:option value="babeldoc">BabelDOC</html:option></html:select></html:label>
+    <html:p>需手动启动项目 scripts/local_pdf_server.py 并安装对应引擎。仅接受本机服务，云端模型仍可能收费。</html:p>
     <html:label>BelinDoc API Key <html:input id="bilingualreader-belin-key" type="password" autocomplete="off"/></html:label>
     <html:label>官方模型版本 <html:input id="bilingualreader-belin-model" type="text" placeholder="从官方 getModelList 获取"/></html:label>
     <html:label>OCR <html:select id="bilingualreader-belin-ocr"><html:option value="auto">自动检测</html:option><html:option value="off">关闭</html:option><html:option value="on">开启（额外消耗额度）</html:option></html:select></html:label>
@@ -296,6 +300,7 @@
   <html:label><html:input id="bilingualreader-checkpoint-enabled" type="checkbox"/> 启用段落级断点续传（独立于普通缓存）</html:label>
   <html:p style="max-width: 760px">本地保存精确原文、译文、引擎标记与段落状态，以便重启后恢复。默认启用；敏感论文可关闭。最多保存 32 个附件，每个附件最多 200 万字符，不自动覆盖旧记录。关闭后不再读写断点；清除按钮可删除已有断点记录。请先停止运行中的任务再清除。</html:p>
   <html:p id="bilingualreader-cache-status"></html:p>
+  <html:details><html:summary>脱敏任务诊断（本次运行，最多300条）</html:summary><html:p>仅保留服务、阶段、状态、HTTP 状态码和计数；不含论文、URL、密钥、文件路径或任务标识。</html:p><html:button id="bilingualreader-diagnostic-refresh" type="button">刷新报告</html:button><html:button id="bilingualreader-diagnostic-clear" type="button">清除</html:button><html:textarea id="bilingualreader-diagnostic-report" readonly="readonly" rows="8" style="width:100%"></html:textarea></html:details>
   <hbox align="center">
     <html:button id="bilingualreader-clear-cache" type="button" style="padding: 2px 12px"
       >清除翻译缓存及断点记录</html:button

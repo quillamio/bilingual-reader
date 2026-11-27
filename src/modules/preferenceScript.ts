@@ -1,3 +1,4 @@
+import { getDiagnosticReport, clearDiagnostics } from "../taskDiagnostics";
 import {
   DEFAULT_OLLAMA_MODEL,
   DEFAULT_SKIP_LAST_PAGES,
@@ -13,6 +14,7 @@ import {
   setFreeFallbackOrder,
   getPDFExportLayout,
   getPDFSideRenderer,
+  getLocalPDFURL, setLocalPDFURL, getLocalPDFToken, setLocalPDFToken, getLocalPDFEngine, setLocalPDFEngine,
   getPDFExportProvider, setPDFExportProvider, getBelinKey, setBelinKey, getBelinModel, setBelinModel, getBelinOCR, setBelinOCR, getBelinLayout, setBelinLayout,
   setPDFSideRenderer,
   setPDFExportLayout,
@@ -461,6 +463,16 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const exportProvider = getElement<HTMLSelectElement>(doc, "bilingualreader-export-provider");
   if (exportProvider) exportProvider.value = getPDFExportProvider();
   onPreferenceEdit(exportProvider, ({ value }) => setPDFExportProvider(value));
+  bindTextPreference(doc,"bilingualreader-localpdf-url",getLocalPDFURL(),setLocalPDFURL);
+  bindTextPreference(doc,"bilingualreader-localpdf-token",getLocalPDFToken(),setLocalPDFToken);
+  const localEngine=getElement<HTMLSelectElement>(doc,"bilingualreader-localpdf-engine");
+  if(localEngine)localEngine.value=getLocalPDFEngine();
+  onPreferenceEdit(localEngine,({value})=>setLocalPDFEngine(value));
+  const diag=getElement<HTMLTextAreaElement>(doc,"bilingualreader-diagnostic-report");
+  const refreshDiag=()=>{if(diag)diag.value=getDiagnosticReport();};
+  getElement<HTMLButtonElement>(doc,"bilingualreader-diagnostic-refresh")?.addEventListener("click",refreshDiag);
+  getElement<HTMLButtonElement>(doc,"bilingualreader-diagnostic-clear")?.addEventListener("click",()=>{clearDiagnostics();refreshDiag();});
+  refreshDiag();
   const belinOCR = getElement<HTMLSelectElement>(doc, "bilingualreader-belin-ocr");
   if (belinOCR) belinOCR.value = getBelinOCR();
   onPreferenceEdit(belinOCR, ({ value }) => setBelinOCR(value));

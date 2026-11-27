@@ -504,6 +504,11 @@ function getReadingTranslationPages(reader: any, doc: Document): PositionedPDFPa
 
 export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null, task?: PDFExportTask): Promise<void> {
   task?.throwIfCancelled();
+  if (getPDFExportProvider() === "localpdf") {
+    const { exportLocalPDF } = await import("./localPDFExport");
+    await exportLocalPDF(reader, button, task);
+    return;
+  }
   if (getPDFExportProvider() === "belindoc") {
     const { exportBelinDoc } = await import("./belinDocExport");
     await exportBelinDoc(reader, button, task);

@@ -168,3 +168,13 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 
 ### BelinDoc 云端整篇导出（实验性）
 选择设置中的 BelinDoc 导出服务，填写 [官方开发者中心](https://belindoc.com/docs) API Key 和 getModelList 返回的模型版本。默认仍是本地导出。用户首先确认上传整篇原始 PDF，然后确认模型额度系数和 OCR，再提交一次任务。支持左右对照、上下对照、仅译文。共享官网额度和水印规则，不承诺无限免费；当前本地限制 30 MB。API Key 保存在本地首选项，勿共享配置文件。云端取消不保证停止计费或删除上传文件，失败/超时后先查服务历史。云端输出不能继承本地科学符号校验、跳页、段落缓存或断点。当前仅按官方文档和模拟响应验证，真实账户联调待验收。参考官方文档更新日期 2026-09-04。
+
+### 新增本地与云端后端（实验性）
+详见 [安装、配置及隐私说明](docs/external-backends.md)。BabelDOC/PDF2zh-next 需自行安装并启动本机桥接；Doc2X、Mathpix 为云端解析；SiliconFlow、OpenRouter、Google Cloud 为独立段落翻译服务。Doclingo 官方接口文档待取得，未伪造协议。上述服务不保证免费。
+
+### 第三方来源补充
+- [BabelDOC](https://github.com/funstory-ai/BabelDOC) 与 [PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next)：AGPL-3.0，上游独立 CLI，不随插件分发其 Python 源码或模型权重；桥接按公开 CLI 文档自行实现。
+- [zotero-interlinear](https://github.com/Muanyan-mjq/zotero-interlinear)（AGPL-3.0-or-later）与 [zotero-bilingual-reader](https://github.com/ChanceZhangcr/zotero-bilingual-reader)（MIT）：参考容灾和导出架构，未直接复制其实现。
+- [Bob](https://github.com/ripperhe/Bob) 与 [Easydict](https://github.com/tisfeng/Easydict)：翻译工具设计参考，本批次未复制源码。
+- Doc2X、Mathpix、SiliconFlow、OpenRouter、Google Cloud、BelinDoc：通过公开 API 协议独立实现，不表示获得其专有软件的再分发许可；使用受各服务条款约束。
+- @pdf-lib/fontkit（MIT）、Noto Sans CJK SC（SIL OFL 1.1）：字体依赖及许可证按构建分发。诊断报告不自动上传。

@@ -279,8 +279,14 @@ export function setPDFSideRenderer(value: string): void {
   setStringPref(BASE + ".export.sideRenderer", value === "browser" || value === "direct" ? value : "auto");
 }
 
-export function getPDFExportProvider(): "local" | "belindoc" { return getStringPref(BASE+".export.provider","local")==="belindoc"?"belindoc":"local"; }
-export function setPDFExportProvider(value:string):void { setStringPref(BASE+".export.provider",value==="belindoc"?"belindoc":"local"); }
+export function getPDFExportProvider(): "local" | "belindoc" | "localpdf" { const v=getStringPref(BASE+".export.provider","local");return v==="belindoc"||v==="localpdf"?v:"local"; }
+export function setPDFExportProvider(value:string):void { setStringPref(BASE+".export.provider",value==="belindoc"||value==="localpdf"?value:"local"); }
+export function getLocalPDFURL():string {return getStringPref(BASE+".localpdf.url","http://127.0.0.1:8787");}
+export function setLocalPDFURL(v:string):void {setStringPref(BASE+".localpdf.url",v);}
+export function getLocalPDFToken():string {return getStringPref(BASE+".localpdf.token","");}
+export function setLocalPDFToken(v:string):void {setStringPref(BASE+".localpdf.token",v);}
+export function getLocalPDFEngine(): "babeldoc"|"pdf2zh-next" {return getStringPref(BASE+".localpdf.engine","pdf2zh-next")==="babeldoc"?"babeldoc":"pdf2zh-next";}
+export function setLocalPDFEngine(v:string):void {setStringPref(BASE+".localpdf.engine",v==="babeldoc"?"babeldoc":"pdf2zh-next");}
 export function getBelinKey():string { return getStringPref(BASE+".belindoc.key",""); }
 export function setBelinKey(value:string):void { setStringPref(BASE+".belindoc.key",value.trim()); }
 export function getBelinModel():string { return getStringPref(BASE+".belindoc.model",""); }
