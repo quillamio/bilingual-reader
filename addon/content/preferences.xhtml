@@ -67,6 +67,13 @@
   </hbox>
   <html:details id="bilingualreader-pdf-troubleshooting">
     <html:summary style="cursor: pointer">解析和导出设置</html:summary>
+    <html:p>整篇 PDF 导出服务（默认本地；不影响普通段落翻译）</html:p>
+    <html:select id="bilingualreader-export-provider"><html:option value="local">本地生成（默认）</html:option><html:option value="belindoc">BelinDoc 云端整篇翻译</html:option></html:select>
+    <html:label>BelinDoc API Key <html:input id="bilingualreader-belin-key" type="password" autocomplete="off"/></html:label>
+    <html:label>官方模型版本 <html:input id="bilingualreader-belin-model" type="text" placeholder="从官方 getModelList 获取"/></html:label>
+    <html:label>OCR <html:select id="bilingualreader-belin-ocr"><html:option value="auto">自动检测</html:option><html:option value="off">关闭</html:option><html:option value="on">开启（额外消耗额度）</html:option></html:select></html:label>
+    <html:label>BelinDoc 输出 <html:select id="bilingualreader-belin-layout"><html:option value="side-by-side">左右对照</html:option><html:option value="stacked">上下对照</html:option><html:option value="translation">仅译文</html:option></html:select></html:label>
+    <html:p>官方文档：https://belindoc.com/docs 。API Key 保存在 Zotero 本地首选项（未加密），云端导出需两次确认，不会自动作为免费备用引擎。取消本地等待不代表取消服务端任务。</html:p>
     <hbox align="center">
       <html:label for="bilingualreader-side-renderer" style="min-width: 140px">左右对照生成方式</html:label>
       <html:select id="bilingualreader-side-renderer" style="min-width: 320px">

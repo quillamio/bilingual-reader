@@ -278,3 +278,14 @@ export function getPDFSideRenderer(): PDFSideRenderer {
 export function setPDFSideRenderer(value: string): void {
   setStringPref(BASE + ".export.sideRenderer", value === "browser" || value === "direct" ? value : "auto");
 }
+
+export function getPDFExportProvider(): "local" | "belindoc" { return getStringPref(BASE+".export.provider","local")==="belindoc"?"belindoc":"local"; }
+export function setPDFExportProvider(value:string):void { setStringPref(BASE+".export.provider",value==="belindoc"?"belindoc":"local"); }
+export function getBelinKey():string { return getStringPref(BASE+".belindoc.key",""); }
+export function setBelinKey(value:string):void { setStringPref(BASE+".belindoc.key",value.trim()); }
+export function getBelinModel():string { return getStringPref(BASE+".belindoc.model",""); }
+export function setBelinModel(value:string):void { setStringPref(BASE+".belindoc.model",value.trim()); }
+export function getBelinOCR(): "auto"|"off"|"on" { const v=getStringPref(BASE+".belindoc.ocr","auto"); return v==="on"||v==="off"?v:"auto"; }
+export function setBelinOCR(v:string):void { setStringPref(BASE+".belindoc.ocr",v==="on"||v==="off"?v:"auto"); }
+export function getBelinLayout(): "stacked"|"side-by-side"|"translation" { const v=getStringPref(BASE+".belindoc.layout","side-by-side");return v==="stacked"||v==="translation"?v:"side-by-side"; }
+export function setBelinLayout(v:string):void { setStringPref(BASE+".belindoc.layout",v==="stacked"||v==="translation"?v:"side-by-side"); }

@@ -20,3 +20,7 @@ pref("fallback.order", "bing,google,tencenttransmart,youdao,huoshanweb");
 pref("checkpoint.enabled", true);
 
 pref("export.sideRenderer", "auto");
+
+pref("export.provider", "local");
+pref("belindoc.ocr", "auto");
+pref("belindoc.layout", "side-by-side");

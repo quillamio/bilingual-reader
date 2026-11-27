@@ -165,3 +165,6 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 设置 → 双语阅读与 PDF 导出 → 解析和导出设置 → 左右对照生成方式。自动模式优先使用 pdf-lib 和 @pdf-lib/fontkit 直接写入可检索的中文文字对象，缺字或生成失败时逐页回退到兼容打印。仅直接生成模式用于诊断，不静默回退。左侧原页保持矢量内容，右侧使用现有安全遮盖后的原页图像，无法安全放回原位的译文放到续页；右侧底图不是全矢量。上下对照默认仍使用旧打印路径。
 
 构建时通过 `npm run prepare:pdf-font` 获取固定提交的 [Noto Sans CJK SC](https://github.com/notofonts/noto-cjk/tree/523d033d6cb47f4a80c58a35753646f5c3608a78)（SIL Open Font License 1.1），校验原始 Git blob 哈希，并将字体和许可证随 XPI 打包。导出期间不下载字体，也不上传 PDF。感谢 Noto CJK、[pdf-lib](https://github.com/Hopding/pdf-lib) 及 [@pdf-lib/fontkit](https://github.com/Hopding/fontkit) 项目。字体原始授权见插件内 fonts/OFL-NotoCJK.txt。
+
+### BelinDoc 云端整篇导出（实验性）
+选择设置中的 BelinDoc 导出服务，填写 [官方开发者中心](https://belindoc.com/docs) API Key 和 getModelList 返回的模型版本。默认仍是本地导出。用户首先确认上传整篇原始 PDF，然后确认模型额度系数和 OCR，再提交一次任务。支持左右对照、上下对照、仅译文。共享官网额度和水印规则，不承诺无限免费；当前本地限制 30 MB。API Key 保存在本地首选项，勿共享配置文件。云端取消不保证停止计费或删除上传文件，失败/超时后先查服务历史。云端输出不能继承本地科学符号校验、跳页、段落缓存或断点。当前仅按官方文档和模拟响应验证，真实账户联调待验收。参考官方文档更新日期 2026-09-04。

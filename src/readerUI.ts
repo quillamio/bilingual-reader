@@ -1,6 +1,6 @@
 import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName, withPDFPrintDeadline } from "./pdfExportUtils";
 import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAssets";
-import { getPDFExportLayout, getTranslateAllPages } from "./settings";
+import { getPDFExportLayout, getTranslateAllPages, getPDFExportProvider } from "./settings";
 import { getNativePDFBackend } from "./pdfNativeDocling";
 import type { PositionedPDFPage } from "./pdfInPlaceLayout";
 import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline, waitForPDFExport } from "./pdfOperationDeadline";
@@ -504,6 +504,11 @@ function getReadingTranslationPages(reader: any, doc: Document): PositionedPDFPa
 
 export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null, task?: PDFExportTask): Promise<void> {
   task?.throwIfCancelled();
+  if (getPDFExportProvider() === "belindoc") {
+    const { exportBelinDoc } = await import("./belinDocExport");
+    await exportBelinDoc(reader, button, task);
+    return;
+  }
   const { hasMinerUReadingFallback, getMinerUReadingResult } = await import("./pdfNativeReadingPanel");
   task?.throwIfCancelled();
   const fallback = getMinerUReadingResult(reader);

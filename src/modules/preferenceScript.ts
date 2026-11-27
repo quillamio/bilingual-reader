@@ -13,6 +13,7 @@ import {
   setFreeFallbackOrder,
   getPDFExportLayout,
   getPDFSideRenderer,
+  getPDFExportProvider, setPDFExportProvider, getBelinKey, setBelinKey, getBelinModel, setBelinModel, getBelinOCR, setBelinOCR, getBelinLayout, setBelinLayout,
   setPDFSideRenderer,
   setPDFExportLayout,
   getMaxCharsPerRequest,
@@ -455,6 +456,17 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const sideRenderer = getElement<HTMLSelectElement>(doc, "bilingualreader-side-renderer");
   if (sideRenderer) sideRenderer.value = getPDFSideRenderer();
   onPreferenceEdit(sideRenderer, ({ value }) => setPDFSideRenderer(value));
+  bindTextPreference(doc, "bilingualreader-belin-key", getBelinKey(), setBelinKey);
+  bindTextPreference(doc, "bilingualreader-belin-model", getBelinModel(), setBelinModel);
+  const exportProvider = getElement<HTMLSelectElement>(doc, "bilingualreader-export-provider");
+  if (exportProvider) exportProvider.value = getPDFExportProvider();
+  onPreferenceEdit(exportProvider, ({ value }) => setPDFExportProvider(value));
+  const belinOCR = getElement<HTMLSelectElement>(doc, "bilingualreader-belin-ocr");
+  if (belinOCR) belinOCR.value = getBelinOCR();
+  onPreferenceEdit(belinOCR, ({ value }) => setBelinOCR(value));
+  const belinLayout = getElement<HTMLSelectElement>(doc, "bilingualreader-belin-layout");
+  if (belinLayout) belinLayout.value = getBelinLayout();
+  onPreferenceEdit(belinLayout, ({ value }) => setBelinLayout(value));
 
   const allPages = getElement<HTMLInputElement>(doc, "bilingualreader-translate-all-pages");
   const nonReferences = getElement<HTMLInputElement>(doc, "bilingualreader-translate-non-references");
