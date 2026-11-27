@@ -230,6 +230,9 @@ describe("native Zotero reading-mode highlight layout", function () {
       if (previous === undefined) Zotero.Prefs.clear(oldPref, true);
       else Zotero.Prefs.set(oldPref, previous, true);
       translated.remove();
+      // These fixtures insert translations directly, without the production observer.
+      // Restore the native annotation geometry before the next test.
+      view._handleViewUpdate(true);
     }
   });
 
@@ -275,6 +278,7 @@ describe("native Zotero reading-mode highlight layout", function () {
       setPDFExportLayout(previousLayout);
       translated.remove();
       right.remove();
+      view._handleViewUpdate(true);
     }
   });
 
