@@ -39,41 +39,54 @@ describe("startup", function () {
   it("managed runtime verifies real Gecko ZIP extraction without executing code", async function () {
     this.timeout(20000);
     const c=(globalThis as any).Components;
-    const temp=Zotero.getTempDirectory();temp.append("br-runtime-fixture");temp.createUnique(1,0o700);
+    const temp=Zotero.getTempDirectory();temp.append("br-runtime-fixture");
+    let phase="create fixture directory";
+    temp.createUnique(1,0o700);
     const child=(folder:any,name:string)=>{const file=folder.clone();file.append(name);return file;};
     try{
+      phase="write source";
       const source=child(temp,"source.txt");
       await (Zotero.File as any).putContentsAsync(source.path,"abc");
       const sha="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+      phase="SHA256 known vector";
       assert.equal(runtimeFileSHA256(source),sha);
       const files=[
         {path:"python/bin/python3.12",size:3,sha256:sha,executable:true},
         {path:"launcher.py",size:3,sha256:sha,executable:false},
         {path:"requirements.lock",size:3,sha256:sha,executable:false},
       ];
+      phase="manifest";
       const manifest=child(temp,"manifest.json");
       await (Zotero.File as any).putContentsAsync(manifest.path,JSON.stringify({schema:1,version:"0.7.1",target:"macos-arm64",files}));
       const archive=child(temp,"runtime.zip");
+      phase="create zip writer";
       const writer=c.classes["@mozilla.org/zipwriter;1"].createInstance(c.interfaces.nsIZipWriter);
+      phase="open ZIP";
       writer.open(archive,0x04|0x08|0x20);
       try{
+        phase="write ZIP entries";
         writer.addEntryFile("runtime-files.json",0,manifest,false);
         for(const member of files)writer.addEntryFile(member.path,0,source,false);
       }finally{writer.close();}
+      phase="assets and digest";
       const assets=child(temp,"assets.zip");
       await (Zotero.File as any).putContentsAsync(assets.path,"abc");
       const release:RuntimeRelease={version:"0.7.1-r1",target:"macos-arm64",
         runtime:{size:Number(archive.fileSize),sha256:runtimeFileSHA256(archive)},assets:{size:3,sha256:sha},
         unpackedSize:9,fileCount:3,manifestSha256:runtimeFileSHA256(manifest)};
+      phase="reject invalid archive digest";
       let rejected=false;
       try{await unpackRuntimeArchive(temp,{...release,runtime:{...release.runtime,sha256:"0".repeat(64)}},{check(){},progress(){}});}catch(_){rejected=true;}
       assert.isTrue(rejected);assert.isFalse(child(temp,"payload").exists());
+      phase="extract verified archive";
       await unpackRuntimeArchive(temp,release,{check(){},progress(){}});
+      phase="verify extracted files";
       const payload=child(temp,"payload"),exe=child(child(child(payload,"python"),"bin"),"python3.12");
       assert.equal(runtimeFileSHA256(exe),sha);
       assert.equal(runtimeFileSHA256(child(payload,"offline-assets.zip")),sha);
       assert.isTrue(child(payload,"installed.json").exists());
-    }finally{if(temp.exists())temp.remove(true);}
+    }catch(error:any){throw new Error("managed runtime fixture: "+phase+"; "+String(error?.message||error)+"; result="+String(error?.result));}
+    finally{if(temp.exists())temp.remove(true);}
   });
   it("should register the preferences pane", function () {
     const pane = Zotero.PreferencePanes.pluginPanes.find(
