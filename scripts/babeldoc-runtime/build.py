@@ -96,6 +96,14 @@ def lock_from_report(report,target):
     if "babeldoc" not in names: raise ValueError("Missing BabelDOC")
     return "\n".join(sorted(requirements))+"\n",sorted(metadata,key=lambda x:x["name"])
 
+def verify_lock(text,target):
+    # The first audited build supplies exact platform-specific wheel hashes.
+    # Canonical LF avoids a different digest solely due to Windows CRLF.
+    data=text.replace("\r\n","\n").encode("utf-8")
+    if hashlib.sha256(data).hexdigest()!=PINS["targets"][target]["dependencyLockSha256"]:
+        raise ValueError("Dependency lock drift; review and update pinned lock deliberately")
+    return data
+
 def pack_candidate(output,archive,wheels,lock):
     # Nested official interpreter archive retained verbatim, not a non-relocatable venv.
     with zipfile.ZipFile(output,"x",compression=zipfile.ZIP_STORED,allowZip64=True) as z:
@@ -116,11 +124,12 @@ def build(args):
         url=f'https://github.com/astral-sh/python-build-standalone/releases/download/{PINS["python"]["release"]}/'+urllib.parse.quote(name,safe="")
         archive=root/"python.tar.gz";checked_download(url,archive,pin["pythonSize"],pin["pythonSha256"])
         safe_extract(archive,first);py=py_path(first)
-        pip=[py,"-I","-m","pip","--isolated","--disable-pip-version-check","--no-input"]
+        pip=[py,"-I","-X","utf8","-m","pip","--isolated","--disable-pip-version-check","--no-input"]
         report=root/"resolve.json"
         run(pip+["install","--index-url",INDEX,"--dry-run","--ignore-installed","--only-binary=:all:","--report",report,"BabelDOC==0.7.1"],home)
         text,deps=lock_from_report(report,target)
-        lock=reportdir/"requirements.lock";lock.write_text(text,encoding="utf-8")
+        lock=reportdir/"requirements.lock";lock.write_bytes(text.encode("utf-8"))
+        verify_lock(text,target)
         (reportdir/"dependencies.json").write_text(json.dumps(deps,indent=2),encoding="utf-8")
         wheels=root/"wheels";wheels.mkdir()
         run(pip+["download","--index-url",INDEX,"--only-binary=:all:","--require-hashes","--no-deps","-r",lock,"-d",wheels],home)
@@ -133,17 +142,17 @@ def build(args):
         with zipfile.ZipFile(package) as z:z.extractall(relocated) # locally generated package, exact member names
         if sha256(relocated/"python.tar.gz")!=pin["pythonSha256"]:raise ValueError("Relocated interpreter mismatch")
         safe_extract(relocated/"python.tar.gz",relocated);py2=py_path(relocated)
-        pip2=[py2,"-I","-m","pip","--isolated","--disable-pip-version-check","--no-input"]
+        pip2=[py2,"-I","-X","utf8","-m","pip","--isolated","--disable-pip-version-check","--no-input"]
         run(pip2+["install","--no-index","--find-links",relocated/"wheels","--only-binary=:all:","--require-hashes","--no-deps","--no-compile","--target",relocated/"site","-r",relocated/"requirements.lock"],root/"second home")
-        run([py2,"-I",relocated/"launcher.py","--home",root/"probe home","probe"],root/"probe home")
+        run([py2,"-I","-X","utf8",relocated/"launcher.py","--home",root/"probe home","probe"],root/"probe home")
         assets=None
         if args.assets:
             assetdir=output/"assets";assetdir.mkdir()
-            run([py2,"-I",relocated/"launcher.py","--home",root/"asset generation home","generate-assets","--assets",assetdir],root/"asset generation home",1800)
+            run([py2,"-I","-X","utf8",relocated/"launcher.py","--home",root/"asset generation home","generate-assets","--assets",assetdir],root/"asset generation home",1800)
             found=list(assetdir.glob("offline_assets_*.zip"))
             if len(found)!=1:raise RuntimeError("Expected one official offline assets archive")
             assets=found[0]
-            run([py2,"-I",relocated/"launcher.py","--home",root/"fresh offline home","verify-assets","--assets",assets],root/"fresh offline home",1800)
+            run([py2,"-I","-X","utf8",relocated/"launcher.py","--home",root/"fresh offline home","verify-assets","--assets",assets],root/"fresh offline home",1800)
         manifest={"schema":1,"status":"candidate-not-approved-for-distribution","target":target,
                   "babeldoc":PINS["babeldoc"],"python":PINS["python"],"pythonSha256":pin["pythonSha256"],
                   "runtime":{"name":package.name,"sha256":sha256(package),"size":package.stat().st_size},
