@@ -280,7 +280,10 @@ export async function parseWithCloudProvider(provider: CloudParser, bytes: Uint8
           const length=Number(response.headers.get("Content-Length")||0);
           if(length>PADDLE_RESULT_LIMIT)throw new Error("PaddleOCR 结果超过容量上限。");
           if(!response.body)throw new Error("PaddleOCR 返回空响应。");
-          const reader=response.body.getReader(),decoder=new TextDecoder();
+          // Gecko typings expose a BYOB/default reader union; getReader() without
+          // options returns the default reader by the Streams standard.
+          const reader=response.body.getReader() as unknown as {read():Promise<{done:boolean;value:Uint8Array}>;releaseLock():void};
+          const decoder=new TextDecoder();
           let size=0;const parts:string[]=[];
           try {
             while(true){
