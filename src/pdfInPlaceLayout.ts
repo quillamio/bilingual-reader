@@ -10,8 +10,8 @@ export interface PositionedPDFPage {
   }>;
 }
 
-type Rect = { x: number; y: number; width: number; height: number };
-type PageLayout = { transform: number[]; width: number; height: number };
+export type Rect = { x: number; y: number; width: number; height: number };
+export type PageLayout = { transform: number[]; width: number; height: number };
 const FONT = '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
 
 function toPageRect(rect: NativeRect, page: PageLayout): Rect | undefined {
@@ -37,15 +37,18 @@ function bound(rects: Rect[]): Rect {
   };
 }
 
+export type PDFTextMetrics = { width: (text: string, size: number, heading?: boolean) => number; lineHeight: (size: number) => number };
+export type PositionedTextLayer = { box: Rect; size: number; lineHeight: number; lines: string[]; heading?: boolean };
+
 function fitText(ctx: CanvasRenderingContext2D, text: string, box: Rect,
-  initialSize: number, heading?: boolean) {
+  initialSize: number, heading?: boolean, metrics?: PDFTextMetrics) {
   const pieces = text.replace(/\s+/gu, " ").trim()
     .match(/[\p{Script=Han}，。；：、！？（）]|[^\s\p{Script=Han}，。；：、！？（）]+| /gu) || [];
   for (let size = Math.max(6, initialSize); size >= 6; size -= 0.5) {
-    const lineHeight = size * 1.22;
+    const lineHeight = metrics ? metrics.lineHeight(size) : size * 1.22;
     const lines: string[] = [];
     ctx.font = (heading ? "bold " : "") + size + "pt " + FONT;
-    const width = (value: string) => ctx.measureText(value).width * 0.75;
+    const width = (value: string) => metrics ? metrics.width(value, size, heading) : ctx.measureText(value).width * 0.75;
     let line = "";
     for (const piece of pieces) {
       const tokens = width(piece) > box.width ? Array.from(piece) : [piece];
@@ -71,9 +74,10 @@ function escape(text: string): string {
 const pt = (n: number) => n.toFixed(3) + "pt";
 
 /** Measure translations with Gecko's fonts and erase only the old text bands. */
-export async function buildInPlacePageHTML(
+export async function prepareInPlacePage(
   doc: Document, original: string, page: PageLayout, paragraphs: PositionedPDFPage["paragraphs"], task?: PDFExportTask,
-): Promise<{ html: string; remaining: PositionedPDFPage["paragraphs"]; placed: number }> {
+  metrics?: PDFTextMetrics,
+): Promise<{ background: string; layers: PositionedTextLayer[]; remaining: PositionedPDFPage["paragraphs"]; placed: number }> {
   const canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas") as HTMLCanvasElement;
   const image = doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
   image.src = original;
@@ -85,7 +89,7 @@ export async function buildInPlacePageHTML(
   if (!ctx) throw new Error("无法绘制右侧 PDF 页面。");
   const sx = canvas.width / page.width, sy = canvas.height / page.height;
   ctx.drawImage(image, 0, 0);
-  const layers: string[] = [];
+  const layers: PositionedTextLayer[] = [];
   const occupied: Rect[] = [];
   const remaining = new Set(paragraphs);
   try {
@@ -108,7 +112,7 @@ export async function buildInPlacePageHTML(
         Math.min(box.y + box.height, other.y + other.height) - Math.max(box.y, other.y) > 2)) continue;
 
       const fontHeight = Math.min(...regions.map(rect => rect.height));
-      const fitted = fitText(ctx, text, box, Math.min(heading ? 28 : 12, fontHeight * 0.81), heading);
+      const fitted = fitText(ctx, text, box, Math.min(heading ? 28 : 12, fontHeight * 0.81), heading, metrics);
       if (!fitted) continue;
 
       // Require light backgrounds at both edges of each text band. This
@@ -130,12 +134,23 @@ export async function buildInPlacePageHTML(
       }
       occupied.push(box);
       remaining.delete(paragraph);
-      layers.push(`<div class="text" style="left:${pt(box.x)};top:${pt(box.y)};font-size:${pt(fitted.size)};line-height:${pt(fitted.lineHeight)};font-weight:${heading ? 700 : 400}">${fitted.lines.map(escape).join("<br>")}</div>`);
+      layers.push({ box, ...fitted, heading });
     }
     const background = canvas.toDataURL("image/png");
     if (!background.startsWith("data:image/png;base64,")) throw new Error("右侧 PDF 页面绘制失败。");
-    return {
-      placed: layers.length, remaining: [...remaining],
+    return { placed: layers.length, remaining: [...remaining], background, layers };
+  } finally {
+    canvas.width = canvas.height = 0;
+  }
+}
+
+/** Legacy Gecko print fallback uses the same safety checks as direct output. */
+export async function buildInPlacePageHTML(
+  doc: Document, original: string, page: PageLayout, paragraphs: PositionedPDFPage["paragraphs"], task?: PDFExportTask,
+): Promise<{ html: string; remaining: PositionedPDFPage["paragraphs"]; placed: number }> {
+  const { background, layers, remaining, placed } = await prepareInPlacePage(doc, original, page, paragraphs, task);
+  const markup = layers.map(({box, size, lineHeight, lines, heading}) => `<div class="text" style="left:${pt(box.x)};top:${pt(box.y)};font-size:${pt(size)};line-height:${pt(lineHeight)};font-weight:${heading ? 700 : 400}">${lines.map(escape).join("<br>")}</div>`);
+  return { placed, remaining,
       html: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
 <style>
@@ -143,9 +158,6 @@ export async function buildInPlacePageHTML(
 html, body { margin:0; padding:0; }
 img { position:absolute; top:0; left:0; width:${pt(page.width)}; height:${pt(page.height)}; }
 .text { position:absolute; color:#101010; white-space:pre; font-family:${FONT}; }
-</style></head><body><img alt="" src="${background}">${layers.join("")}</body></html>`,
-    };
-  } finally {
-    canvas.width = canvas.height = 0;
-  }
+</style></head><body><img alt="" src="${background}">${markup.join("")}</body></html>`,
+  };
 }

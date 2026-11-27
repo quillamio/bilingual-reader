@@ -3,7 +3,7 @@
  * Side-by-side embeds original PDF pages; stacked prints the parsed transcript.
  */
 import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getMixedRouteCacheTag,
-  getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, type PDFExportLayout } from "./settings";
+  getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, getPDFSideRenderer, type PDFExportLayout } from "./settings";
 import { saveCachedTranslation } from "./translationCache";
 import { runParagraphPass } from "./translationCheckpoint";
 import { openTranslationCheckpoint } from "./zoteroCheckpoint";
@@ -23,6 +23,7 @@ import { isManagedService, assertServiceConfigured } from "./serviceCatalog";
 import { describePDFParser, PDF_PARSER_NAMES, withoutBibliography, type NativeDocument, type NativeBlock } from "./pdfNativeModel";
 import { buildNativeBilingualHTML, buildTranslatedPageHTML, type NativeExportPage } from "./pdfNativeHtml";
 import { buildInPlacePageHTML, type PositionedPDFPage } from "./pdfInPlaceLayout";
+import { buildDirectRightPage } from "./pdfDirectExport";
 import { isBodyText, joinPDFLines, normalizedSource, uncoveredBlocks } from "./pdfCoverage";
 import type { MinerUReadingResult } from "./pdfNativeReadingPanel";
 
@@ -219,6 +220,8 @@ export async function saveSideBySidePDF(
   let placed = 0;
   let onContinuation = 0;
   let printIndex = 0;
+  let fallbackPages = 0;
+  const renderer = getPDFSideRenderer();
   async function print(html: string, geometry?: { width: number; height: number }) {
     task?.throwIfCancelled();
     const temp = Zotero.getTempDirectory();
@@ -240,6 +243,27 @@ export async function saveSideBySidePDF(
       }
       let bytes: Uint8Array | undefined;
       let remaining = page.paragraphs;
+      if (renderer !== "browser") {
+        try {
+          progress(button, "直接生成右侧 PDF：" + (page.pageIndex + 1) + "/" + pages.length);
+          let original: { png: string; geometry: Awaited<ReturnType<typeof getPDFPageLayout>> } | undefined;
+          if (page.paragraphs.some(paragraph => paragraph.rects.length)) {
+            const geometry = await getPDFPageLayout(reader, page.pageIndex, task);
+            const png = await renderPDFRegion(reader, page.pageIndex, geometry.box, task);
+            if (png) original = { png, geometry };
+          }
+          const result = await buildDirectRightPage(Zotero.getMainWindow().document, page.pageIndex, page.paragraphs, original, task);
+          placed += result.placed;
+          onContinuation += result.remaining.length;
+          yield { pageIndex: page.pageIndex, bytes: result.bytes, continuation: result.continuation };
+          continue;
+        } catch (error) {
+          if (task?.cancelled || error instanceof PDFExportCancelledError || error instanceof PDFOperationTimeoutError || renderer === "direct") throw error;
+          // Only retry the current page; never discard completed pages or send text to a service.
+          fallbackPages++;
+          Zotero.logError(new Error("直接 PDF 生成失败，使用兼容打印。"));
+        }
+      }
       if (page.paragraphs.some(paragraph => paragraph.rects.length)) {
         try {
           const geometry = await getPDFPageLayout(reader, page.pageIndex, task);
@@ -275,7 +299,8 @@ export async function saveSideBySidePDF(
     if (!placed && !onContinuation) throw new Error("没有可导出的译文。");
     await writePDFFile(combined, paired, task);
     await importExportedPDF(combined, attachment, partial ? "左右对照翻译（部分译文）" : "左右对照翻译", task);
-    return onContinuation ? `\n${onContinuation} 段无法安全放回原位，已加入对应原页的译文续页。` : "";
+    return (onContinuation ? `\n${onContinuation} 段无法安全放回原位，已加入对应原页的译文续页。` : "") +
+      (fallbackPages ? `\n${fallbackPages} 页直接生成不可用，已使用兼容打印。` : "");
   } finally {
     try { if (combined.exists()) combined.remove(false); } catch (_) { /* Temp only */ }
     progress(button, oldTitle);

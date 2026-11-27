@@ -68,6 +68,15 @@
   <html:details id="bilingualreader-pdf-troubleshooting">
     <html:summary style="cursor: pointer">解析和导出设置</html:summary>
     <hbox align="center">
+      <html:label for="bilingualreader-side-renderer" style="min-width: 140px">左右对照生成方式</html:label>
+      <html:select id="bilingualreader-side-renderer" style="min-width: 320px">
+        <html:option value="auto">自动：直接生成优先，失败时兼容打印</html:option>
+        <html:option value="direct">仅直接生成（诊断）</html:option>
+        <html:option value="browser">兼容打印（旧版）</html:option>
+      </html:select>
+    </hbox>
+    <html:p>直接生成使用内置 Noto CJK 字体，无需联网。右侧译文可检索，原图仍采用安全遮盖后的页面图像。无法安全原位排版时自动使用译文续页。</html:p>
+    <hbox align="center">
       <html:label for="bilingualreader-native-backend" style="min-width: 140px">PDF 解析引擎</html:label>
       <html:select id="bilingualreader-native-backend" style="min-width: 320px; padding: 2px 8px">
         <html:option value="pdfjs">Zotero / PDF.js（内置）</html:option>

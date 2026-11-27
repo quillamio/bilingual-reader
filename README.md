@@ -159,3 +159,9 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 - [Zotero 的 Make It Red 示例](https://github.com/zotero/make-it-red) 提供了插件启动代码的基础。
 - [Google Noto Emoji](https://github.com/googlefonts/noto-emoji)（Apache-2.0）提供了麻将红中图标。
 - [pdf-lib](https://github.com/Hopding/pdf-lib)（MIT）：实际打包依赖，用于嵌入原始 PDF 页面；相关第三方许可证见 addon/content/licenses/pdf-export-dependencies.txt。
+
+### 左右对照直接生成（实验性）
+
+设置 → 双语阅读与 PDF 导出 → 解析和导出设置 → 左右对照生成方式。自动模式优先使用 pdf-lib 和 @pdf-lib/fontkit 直接写入可检索的中文文字对象，缺字或生成失败时逐页回退到兼容打印。仅直接生成模式用于诊断，不静默回退。左侧原页保持矢量内容，右侧使用现有安全遮盖后的原页图像，无法安全放回原位的译文放到续页；右侧底图不是全矢量。上下对照默认仍使用旧打印路径。
+
+构建时通过 `npm run prepare:pdf-font` 获取固定提交的 [Noto Sans CJK SC](https://github.com/notofonts/noto-cjk/tree/523d033d6cb47f4a80c58a35753646f5c3608a78)（SIL Open Font License 1.1），校验原始 Git blob 哈希，并将字体和许可证随 XPI 打包。导出期间不下载字体，也不上传 PDF。感谢 Noto CJK、[pdf-lib](https://github.com/Hopding/pdf-lib) 及 [@pdf-lib/fontkit](https://github.com/Hopding/fontkit) 项目。字体原始授权见插件内 fonts/OFL-NotoCJK.txt。

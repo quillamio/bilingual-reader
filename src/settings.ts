@@ -5,6 +5,7 @@ const BASE = "extensions.zotero.bilingualreader";
 
 export type TranslationEngine = string;
 export type PDFExportLayout = "stacked" | "side-by-side";
+export type PDFSideRenderer = "auto" | "direct" | "browser";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
@@ -268,4 +269,12 @@ export function getRoutedCacheTags(primary: string): string[] {
   const engines = getRouteEngines(primary);
   const tags = engines.map(engine => getCacheEngineTag(undefined, engine));
   return engines.length > 1 ? [...tags, getMixedRouteCacheTag(primary)] : tags;
+}
+
+export function getPDFSideRenderer(): PDFSideRenderer {
+  const value = getStringPref(BASE + ".export.sideRenderer", "auto");
+  return value === "browser" || value === "direct" ? value : "auto";
+}
+export function setPDFSideRenderer(value: string): void {
+  setStringPref(BASE + ".export.sideRenderer", value === "browser" || value === "direct" ? value : "auto");
 }

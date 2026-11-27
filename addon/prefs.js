@@ -18,3 +18,5 @@ pref("fallback.enabled", false);
 pref("fallback.order", "bing,google,tencenttransmart,youdao,huoshanweb");
 
 pref("checkpoint.enabled", true);
+
+pref("export.sideRenderer", "auto");

@@ -12,6 +12,8 @@ import {
   getFreeFallbackOrder,
   setFreeFallbackOrder,
   getPDFExportLayout,
+  getPDFSideRenderer,
+  setPDFSideRenderer,
   setPDFExportLayout,
   getMaxCharsPerRequest,
   getMaxBatchParagraphs,
@@ -450,6 +452,9 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const exportLayout = getElement<HTMLSelectElement>(doc, "bilingualreader-export-layout");
   if (exportLayout) exportLayout.value = getPDFExportLayout();
   onPreferenceEdit(exportLayout, ({ value }) => setPDFExportLayout(value));
+  const sideRenderer = getElement<HTMLSelectElement>(doc, "bilingualreader-side-renderer");
+  if (sideRenderer) sideRenderer.value = getPDFSideRenderer();
+  onPreferenceEdit(sideRenderer, ({ value }) => setPDFSideRenderer(value));
 
   const allPages = getElement<HTMLInputElement>(doc, "bilingualreader-translate-all-pages");
   const nonReferences = getElement<HTMLInputElement>(doc, "bilingualreader-translate-non-references");

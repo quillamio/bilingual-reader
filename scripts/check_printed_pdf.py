@@ -114,3 +114,11 @@ with fitz.open(path.with_name("side-by-side-export.pdf")) as positioned:
         samples[0::3], samples[1::3], samples[2::3],
     )) > 100
 print("PASS: original bilingual-sheet text remains left; both replacements and figures remain in position on the right.")
+
+# Strict direct-renderer toolbar fixture above must contain searchable Chinese, not just images.
+with fitz.open(path.with_name("side-by-side-export.pdf")) as direct:
+    right = fitz.Rect(direct[0].rect.width / 2, 0, direct[0].rect.width, direct[0].rect.height)
+    text = direct[0].get_text(clip=right)
+    for marker in ("左栏原位译文", "右栏原位译文"):
+        assert marker in text, f"Missing searchable Chinese text: {marker}"
+print("PASS: direct PDF contains searchable Chinese in both columns.")

@@ -14,3 +14,6 @@ tsconfig.tsbuildinfo
 .scaffold
 build
 logs
+
+# Verified build-time OFL font assets
+addon/content/fonts/

@@ -4,7 +4,7 @@ import { exportBilingualPDF, renderReaderExportButton } from "../src/readerUI";
 import { normalizeMinerU } from "../src/pdfCloudModel";
 import { saveSideBySidePDF, supplementReadingPDFPages } from "../src/pdfNativeExport";
 import { toggleBilingualReading } from "../src/bilingualReader";
-import { getPDFExportLayout, setPDFExportLayout } from "../src/settings";
+import { getPDFExportLayout, setPDFExportLayout, getPDFSideRenderer, setPDFSideRenderer } from "../src/settings";
 import { readPDFFile, writePDFFile } from "../src/pdfVectorExport";
 import { PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
 import { cleanupReadingLayout, observeReadingLayout } from "../src/readingLayout";
@@ -251,6 +251,7 @@ describe("native Zotero reading-mode highlight layout", function () {
     doc.querySelector('[data-ref-path="88"]')!.after(right);
     const originalRequest = Zotero.HTTP.request;
     const previousLayout = getPDFExportLayout();
+    const previousRenderer = getPDFSideRenderer();
     const before = parent.getAttachments();
     const alerts: string[] = [];
     let requests = 0;
@@ -260,6 +261,7 @@ describe("native Zotero reading-mode highlight layout", function () {
         throw new Error("Printing completed translations must not call a translation service.");
       }) as typeof originalRequest;
       setPDFExportLayout("side-by-side");
+      setPDFSideRenderer("direct");
       await waitForPrinter(printFromToolbar(alerts));
       assert.include(alerts.join("\n"), "左右对照导出成功", alerts.join(" | "));
       assert.equal(requests, 0);
@@ -276,6 +278,7 @@ describe("native Zotero reading-mode highlight layout", function () {
     } finally {
       Zotero.HTTP.request = originalRequest;
       setPDFExportLayout(previousLayout);
+      setPDFSideRenderer(previousRenderer);
       translated.remove();
       right.remove();
       view._handleViewUpdate(true);
