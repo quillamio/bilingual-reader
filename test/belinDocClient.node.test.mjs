@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { translateBelinPDF, belinData, belinDownloadURL, signedBelinURL, outputType, checkBelinPDF } from "../src/belinDocClient.ts";
+import { translateBelinPDF, belinData, belinDownloadURL, signedBelinURL, outputType, checkBelinPDF, belinUploadHeaders, BelinStorageHTTPError } from "../src/belinDocClient.ts";
 const bytes = new TextEncoder().encode("%PDF-1.7\nsample\n%%EOF\n");
 const wrap=data=>({code:"200",data});
 function fixture({status=3,confirm=true,malformed=false}={}) {
@@ -44,4 +44,53 @@ test("malicious signed URL never receives the source PDF or API key",async()=>{
    return f.request(method,url,headers,body,type);
  };
  await assert.rejects(translateBelinPDF(request,bytes,f.options),/存储地址/);assert.equal(writes,0);
+});
+
+test("SigV4 upload includes exactly supported signed headers and preserves the query",()=>{
+ const url="https://example.s3.amazonaws.com/a%20b?X-Amz-SignedHeaders=content-disposition%3Bcontent-type%3Bhost&X-Amz-Signature=ABC%2BDEF";
+ assert.equal(signedBelinURL(url),url);
+ assert.deepEqual(belinUploadHeaders(url),{"Content-Disposition":'attachment; filename="document.pdf"',"Content-Type":"application/pdf"});
+ assert.deepEqual(belinUploadHeaders(url,'inline; filename=document.pdf'),{"Content-Disposition":"inline; filename=document.pdf","Content-Type":"application/pdf"});
+ assert.deepEqual(belinUploadHeaders("https://example.s3.amazonaws.com/a?X-Amz-SignedHeaders=host"),{});
+ for(const name of ["authorization","x-api-key","x-amz-checksum-sha256"]){
+   assert.throws(()=>belinUploadHeaders("https://example.s3.amazonaws.com/a?X-Amz-SignedHeaders=host%3B"+name),/不支持/);
+ }
+ for(const value of ['attachment; filename="private.pdf"','attachment; filename="document.pdf"\r\nX-Api-Key: secret']){
+   assert.throws(()=>belinUploadHeaders(url,value),/格式无效/);
+ }
+});
+test("SigV4 upload receives anonymous filename header, does not submit after 403",async()=>{
+ const f=fixture();let puts=0;
+ const req=async(method,url,headers,body,type)=>{
+   if(url.endsWith("batchPresignedUploadUrl"))return wrap([{objectKey:"object",storageType:1,fileName:"document.pdf",persignedUploadUrl:"https://example.s3.amazonaws.com/input?X-Amz-SignedHeaders=content-disposition%3Bhost&X-Amz-Signature=secret"}]);
+   if(method==="PUT"){
+     puts++;
+     assert.deepEqual(headers,{"Content-Disposition":'attachment; filename="document.pdf"'});
+     assert.deepEqual(new Uint8Array(body),bytes);
+     throw new BelinStorageHTTPError(403,"upload","<Error><Code>SignatureDoesNotMatch</Code><CanonicalRequest>SECRET</CanonicalRequest></Error>");
+   }
+   return f.request(method,url,headers,body,type);
+ };
+ await assert.rejects(translateBelinPDF(req,bytes,f.options),error=>error.message.includes("HTTP 403 SignatureDoesNotMatch")&&error.message.includes("尚未提交")&&!error.message.includes("SECRET"));
+ assert.equal(puts,1);
+ assert.ok(!f.calls.some(x=>x.url.endsWith("batchSubmitTranslateTask")||x.url.endsWith("isOcr")));
+});
+test("storage errors expose only HTTP status and allowlisted codes, never XML secrets",()=>{
+ const error=new BelinStorageHTTPError(403,"upload","<Error><Code>SignatureDoesNotMatch</Code><Message>key=SECRET</Message><StringToSign>PRIVATE</StringToSign></Error>");
+ assert.equal(error.status,403);assert.equal(error.code,"SignatureDoesNotMatch");
+ assert.ok(error.message.includes("HTTP 403 SignatureDoesNotMatch"));
+ assert.ok(!error.message.includes("SECRET")&&!error.message.includes("PRIVATE"));
+ const unknown=new BelinStorageHTTPError(403,"download","<Code>SecretToken</Code>");
+ assert.equal(unknown.code,undefined);assert.ok(!unknown.message.includes("SecretToken"));
+});
+test("unknown signed header and mismatched fileName block upload",async()=>{
+ for(const upload of [{fileName:"document.pdf",persignedUploadUrl:"https://example.s3.amazonaws.com/a?X-Amz-SignedHeaders=host%3Bx-amz-checksum-sha256"},{fileName:"different.pdf",persignedUploadUrl:"https://example.s3.amazonaws.com/a"}]){
+   const f=fixture();let puts=0;
+   const req=async(method,url,headers,body,type)=>{
+     if(method==="PUT")puts++;
+     if(url.endsWith("batchPresignedUploadUrl"))return wrap([{objectKey:"object",storageType:1,...upload}]);
+     return f.request(method,url,headers,body,type);
+   };
+   await assert.rejects(translateBelinPDF(req,bytes,f.options));assert.equal(puts,0);
+ }
 });

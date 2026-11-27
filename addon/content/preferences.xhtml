@@ -75,6 +75,8 @@
     <html:p>需手动启动项目 scripts/local_pdf_server.py 并安装对应引擎。仅接受本机服务，云端模型仍可能收费。</html:p>
     <html:label>BelinDoc API Key <html:input id="bilingualreader-belin-key" type="password" autocomplete="off"/></html:label>
     <html:label>官方模型版本 <html:input id="bilingualreader-belin-model" type="text" placeholder="从官方 getModelList 获取"/></html:label>
+    <html:label>BelinDoc 上传签名 Content-Disposition（高级） <html:input id="bilingualreader-belin-content-disposition" type="text" placeholder="attachment; filename=&quot;document.pdf&quot;"/></html:label>
+    <html:p>仅在签名要求此请求头时使用。留空采用尚待真实验证的候选值；如服务方确认其他格式，可填写准确值，文件名必须为 document.pdf。遇到签名错误不会自动重传或提交任务。</html:p>
     <html:label>OCR <html:select id="bilingualreader-belin-ocr"><html:option value="auto">自动检测</html:option><html:option value="off">关闭</html:option><html:option value="on">开启（额外消耗额度）</html:option></html:select></html:label>
     <html:label>BelinDoc 输出 <html:select id="bilingualreader-belin-layout"><html:option value="side-by-side">左右对照</html:option><html:option value="stacked">上下对照</html:option><html:option value="translation">仅译文</html:option></html:select></html:label>
     <html:p>官方文档：https://belindoc.com/docs 。API Key 保存在 Zotero 本地首选项（未加密），云端导出需两次确认，不会自动作为免费备用引擎。取消本地等待不代表取消服务端任务。</html:p>

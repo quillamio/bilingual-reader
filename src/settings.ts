@@ -295,3 +295,7 @@ export function getBelinOCR(): "auto"|"off"|"on" { const v=getStringPref(BASE+".
 export function setBelinOCR(v:string):void { setStringPref(BASE+".belindoc.ocr",v==="on"||v==="off"?v:"auto"); }
 export function getBelinLayout(): "stacked"|"side-by-side"|"translation" { const v=getStringPref(BASE+".belindoc.layout","side-by-side");return v==="stacked"||v==="translation"?v:"side-by-side"; }
 export function setBelinLayout(v:string):void { setStringPref(BASE+".belindoc.layout",v==="stacked"||v==="translation"?v:"side-by-side"); }
+
+/** Optional override for the exact provider-signed upload disposition; no actual filename. */
+export function getBelinContentDisposition():string { return getStringPref(BASE+".belindoc.contentDisposition",""); }
+export function setBelinContentDisposition(value:string):void { setStringPref(BASE+".belindoc.contentDisposition",value.trim()); }

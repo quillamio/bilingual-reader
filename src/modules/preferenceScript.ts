@@ -15,7 +15,7 @@ import {
   getPDFExportLayout,
   getPDFSideRenderer,
   getLocalPDFURL, setLocalPDFURL, getLocalPDFToken, setLocalPDFToken, getLocalPDFEngine, setLocalPDFEngine,
-  getPDFExportProvider, setPDFExportProvider, getBelinKey, setBelinKey, getBelinModel, setBelinModel, getBelinOCR, setBelinOCR, getBelinLayout, setBelinLayout,
+  getPDFExportProvider, setPDFExportProvider, getBelinKey, setBelinKey, getBelinModel, setBelinModel, getBelinOCR, setBelinOCR, getBelinLayout, setBelinLayout, getBelinContentDisposition, setBelinContentDisposition,
   setPDFSideRenderer,
   setPDFExportLayout,
   getMaxCharsPerRequest,
@@ -460,6 +460,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   onPreferenceEdit(sideRenderer, ({ value }) => setPDFSideRenderer(value));
   bindTextPreference(doc, "bilingualreader-belin-key", getBelinKey(), setBelinKey);
   bindTextPreference(doc, "bilingualreader-belin-model", getBelinModel(), setBelinModel);
+  bindTextPreference(doc, "bilingualreader-belin-content-disposition", getBelinContentDisposition(), setBelinContentDisposition);
   const exportProvider = getElement<HTMLSelectElement>(doc, "bilingualreader-export-provider");
   if (exportProvider) exportProvider.value = getPDFExportProvider();
   onPreferenceEdit(exportProvider, ({ value }) => setPDFExportProvider(value));

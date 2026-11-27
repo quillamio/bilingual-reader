@@ -1,10 +1,11 @@
 import { PDFDocument } from "pdf-lib";
-import { BELIN_MAX_BYTES, BELIN_BASE, translateBelinPDF, type BelinRequest } from "./belinDocClient";
-import { getBelinKey, getBelinModel, getBelinOCR, getBelinLayout } from "./settings";
+import { BELIN_MAX_BYTES, BELIN_BASE, BelinStorageHTTPError, translateBelinPDF, type BelinRequest } from "./belinDocClient";
+import { getBelinKey, getBelinModel, getBelinOCR, getBelinLayout, getBelinContentDisposition } from "./settings";
 import { readOriginalAttachment, writePDFFile } from "./pdfVectorExport";
 import { importExportedPDF } from "./readerUI";
 import { withPDFOperationDeadline, waitForPDFExport } from "./pdfOperationDeadline";
 import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
+import { recordDiagnostic } from "./taskDiagnostics";
 
 let active = false;
 export async function exportBelinDoc(reader: any, button: HTMLButtonElement | null, task?: PDFExportTask): Promise<void> {
@@ -30,7 +31,13 @@ export async function exportBelinDoc(reader: any, button: HTMLButtonElement | nu
           try {
             return await withPDFOperationDeadline("BelinDoc 存储请求",180000,async()=>{
               const response=await main.fetch(url,{method,body:body as ArrayBuffer|undefined,headers,credentials:"omit",redirect:"error",cache:"no-store",signal:abort.signal});
-              if(!response.ok) throw new Error("存储请求失败");
+              if(!response.ok) {
+                // S3 can return a canonical request and credential information in XML.
+                // Extract only an allowlisted code; never display or log the body or URL.
+                let xml = "";
+                try { xml = await response.text(); } catch (_) { /* preserve HTTP status */ }
+                throw new BelinStorageHTTPError(response.status,method === "PUT" ? "upload" : "download",xml);
+              }
               return responseType==="arraybuffer"?await response.arrayBuffer():await response.text();
             },()=>abort.abort(),task);
           } finally {abort.abort();}
@@ -41,12 +48,17 @@ export async function exportBelinDoc(reader: any, button: HTMLButtonElement | nu
         return responseType === "json" && typeof xhr.response === "string" ? JSON.parse(xhr.response):xhr.response;
       } catch (error: any) {
         if (task?.cancelled || error instanceof PDFExportCancelledError) throw new PDFExportCancelledError();
+        if (error instanceof BelinStorageHTTPError) {
+          recordDiagnostic("belindoc","request","failure",error.status);
+          throw error;
+        }
         const status = Number(error?.status || error?.xmlhttp?.status || 0);
+        recordDiagnostic("belindoc","request","failure",status);
         throw new Error("BelinDoc 请求失败" + (status >= 400 && status < 600 ? "（HTTP " + status + "）":"（网络、超时或响应异常）") + "；若已提交，请查看云端历史，勿直接重复扣费。");
       }
     };
     const bytes = await withPDFOperationDeadline("BelinDoc 云端流程",30*60*1000,() => translateBelinPDF(request,original,{
-      key,model,layout,ocr,
+      key,model,layout,ocr,contentDisposition:getBelinContentDisposition(),
       check:()=>task?.throwIfCancelled(),
       wait:ms=>waitForPDFExport(ms,task),
       progress:stage=>{ if(button && !task?.cancelled){button.title="BelinDoc："+stage+" · 点击停止";button.setAttribute("aria-label",button.title);} },
