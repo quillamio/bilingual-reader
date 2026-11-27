@@ -551,6 +551,68 @@ describe("native Zotero reading-mode highlight layout", function () {
     if (dir) file.copyTo(Zotero.File.pathToFile(dir), "in-place-continuation.pdf");
   });
 
+  nativeTest("direct CJK continuation preserves every numbered line without repeating the source", async () => {
+    const previous = getPDFSideRenderer();
+    const before = parent.getAttachments();
+    try {
+      setPDFSideRenderer("direct");
+      const lines = Array.from({ length: 112 }, (_, i) => "BRDIRECT" + String(i).padStart(4, "0") + " 中文续页完整性");
+      const note = await saveSideBySidePDF(reader, attachment, [{
+        pageIndex: 0, paragraphs: [{ text: lines.join("\n"), rects: [] }],
+      }], null);
+      assert.include(note, "译文续页");
+      assert.notInclude(note, "兼容打印");
+      const [id] = parent.getAttachments().filter(id => !before.includes(id));
+      assert.exists(id);
+      const file = Zotero.File.pathToFile((await Zotero.Items.get(id).getFilePathAsync()) as string);
+      const pdf = await PDFDocument.load(await readPDFFile(file));
+      assert.isAtLeast(pdf.getPageCount(), 3);
+      const env = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment);
+      const dir = env.get("BR_PDF_REGRESSION_DIR");
+      if (dir) file.copyTo(Zotero.File.pathToFile(dir), "direct-continuation.pdf");
+    } finally { setPDFSideRenderer(previous); }
+  });
+
+  nativeTest("strict direct mode rejects missing glyphs; automatic mode falls back to actual browser printing", async () => {
+    const previous = getPDFSideRenderer();
+    const before = parent.getAttachments();
+    // Noto Sans CJK SC does not cover the DNA emoji; the ASCII and Chinese
+    // anchors must survive the fallback independently of system emoji fonts.
+    const pages = [{ pageIndex: 0, paragraphs: [{ text: "BRFALLBACK 兼容打印验证 🧬", rects: [] }] }];
+    try {
+      setPDFSideRenderer("direct");
+      let rejected = false;
+      try { await saveSideBySidePDF(reader, attachment, pages, null); }
+      catch (error) {
+        assert.include(String(error), "does not cover every character");
+        rejected = true;
+      }
+      assert.isTrue(rejected, "Strict direct mode must not silently print");
+      assert.deepEqual(parent.getAttachments(), before);
+      setPDFSideRenderer("auto");
+      const note = await saveSideBySidePDF(reader, attachment, pages, null);
+      assert.include(note, "1 页直接生成不可用，已使用兼容打印");
+      const [id] = parent.getAttachments().filter(id => !before.includes(id));
+      assert.exists(id);
+      const file = Zotero.File.pathToFile((await Zotero.Items.get(id).getFilePathAsync()) as string);
+      assert.equal((await PDFDocument.load(await readPDFFile(file))).getPageCount(), 1);
+      const env = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment);
+      const dir = env.get("BR_PDF_REGRESSION_DIR");
+      if (dir) file.copyTo(Zotero.File.pathToFile(dir), "direct-fallback.pdf");
+      setPDFSideRenderer("browser");
+      const existing = parent.getAttachments();
+      const legacyNote = await saveSideBySidePDF(reader, attachment, [{
+        pageIndex: 0, paragraphs: [{ text: "BRLEGACY 旧版打印验证", rects: [] }],
+      }], null);
+      assert.notInclude(legacyNote, "直接生成不可用");
+      const [legacyID] = parent.getAttachments().filter(id => !existing.includes(id));
+      assert.exists(legacyID);
+      const legacy = Zotero.File.pathToFile((await Zotero.Items.get(legacyID).getFilePathAsync()) as string);
+      assert.equal((await PDFDocument.load(await readPDFFile(legacy))).getPageCount(), 1);
+      if (dir) legacy.copyTo(Zotero.File.pathToFile(dir), "direct-legacy.pdf");
+    } finally { setPDFSideRenderer(previous); }
+  });
+
   nativeTest("places normalized OCR text on an image-only PDF and keeps its diagram", async () => {
     const scanDoc = Zotero.getMainWindow().document;
     const canvas = scanDoc.createElementNS("http://www.w3.org/1999/xhtml", "canvas") as HTMLCanvasElement;

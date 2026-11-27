@@ -122,3 +122,56 @@ with fitz.open(path.with_name("side-by-side-export.pdf")) as direct:
     for marker in ("左栏原位译文", "右栏原位译文"):
         assert marker in text, f"Missing searchable Chinese text: {marker}"
 print("PASS: direct PDF contains searchable Chinese in both columns.")
+
+# Verify actual font programs, Unicode mapping, and physical ink, not merely
+# successful PDF parsing. Search coordinates and rendered pixels are independent.
+with fitz.open(path.with_name("side-by-side-export.pdf")) as direct:
+    sheet = direct[0]
+    fonts = [font for font in sheet.get_fonts(full=True) if "NotoSansCJK" in font[3]]
+    assert fonts, "Missing embedded Noto CJK font"
+    assert any(direct.extract_font(font[0])[3] for font in fonts), "Missing font program"
+    for marker in ("左栏原位译文", "右栏原位译文"):
+        rects = sheet.search_for(marker)
+        assert len(rects) == 1 and rects[0].x0 > sheet.rect.width / 2
+        pix = sheet.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rects[0], alpha=False)
+        assert sum(max(pixel) < 160 for pixel in zip(pix.samples[0::pix.n], pix.samples[1::pix.n], pix.samples[2::pix.n])) > 8
+print("PASS: embedded CJK font program and visible searchable Chinese glyphs.")
+
+with fitz.open(path.with_name("direct-continuation.pdf")) as continuation:
+    seen = []
+    left_count = 0
+    chinese_count = 0
+    for sheet in continuation:
+        mid = sheet.rect.width / 2
+        left = fitz.Rect(0, 0, mid, sheet.rect.height)
+        right = fitz.Rect(mid, 0, sheet.rect.width, sheet.rect.height)
+        left_count += sheet.get_text(clip=left).count("Synthetic reader layout test.")
+        chinese_count += sheet.get_text(clip=right).count("中文续页完整性")
+        for word in sheet.get_text("words"):
+            if not re.fullmatch(r"BRDIRECT\d{4}", word[4]):
+                continue
+            rect = fitz.Rect(word[:4])
+            assert right.contains(rect), (word[4], rect)
+            pix = sheet.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect, alpha=False)
+            assert sum(max(pixel) < 160 for pixel in zip(pix.samples[0::pix.n], pix.samples[1::pix.n], pix.samples[2::pix.n])) > 8
+            seen.append(word[4])
+    assert len(continuation) >= 3 and left_count == 1
+    assert seen == [f"BRDIRECT{i:04d}" for i in range(112)], seen
+    assert chinese_count == 112, chinese_count
+print(f"PASS: 112 ordered and visible direct continuation markers with Chinese; original appears once.")
+
+for name, anchor, chinese in [
+    ("direct-fallback.pdf", "BRFALLBACK", "兼容打印验证"),
+    ("direct-legacy.pdf", "BRLEGACY", "旧版打印验证"),
+]:
+    with fitz.open(path.with_name(name)) as fallback:
+        assert len(fallback) == 1
+        sheet = fallback[0]
+        right = fitz.Rect(sheet.rect.width / 2, 0, sheet.rect.width, sheet.rect.height)
+        assert anchor in sheet.get_text(clip=right)
+        assert chinese in sheet.get_text(clip=right)
+        rects = sheet.search_for(anchor)
+        assert len(rects) == 1 and right.contains(rects[0])
+        pix = sheet.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rects[0], alpha=False)
+        assert sum(max(pixel) < 160 for pixel in zip(pix.samples[0::pix.n], pix.samples[1::pix.n], pix.samples[2::pix.n])) > 8
+print("PASS: automatic missing-glyph fallback and explicitly selected legacy printing produce visible searchable text.")
