@@ -647,6 +647,7 @@ export function renderReaderExportButton(event: any): void {
             button.setAttribute("aria-label", button.title);
           });
           exportTasks.set(reader, task);
+          button.setAttribute("aria-busy", "true");
           button.textContent = "⏹️";
           button.title = "正在导出，点击停止";
           button.setAttribute("aria-label", button.title);
@@ -661,6 +662,7 @@ export function renderReaderExportButton(event: any): void {
               button.textContent = PRINTER_EMOJI;
               button.title = oldTitle;
               button.setAttribute("aria-label", oldTitle);
+              button.setAttribute("aria-busy", "false");
               button.disabled = false;
             } catch (_) { /* Reader may have closed during export. */ }
           });

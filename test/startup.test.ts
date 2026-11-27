@@ -25,8 +25,11 @@ import {
 } from "../src/builtInTranslationServices";
 import { parseNormalPDFWithPDFJS, getNormalPDFProxy } from "../src/pdfNativeRuntime";
 import { validateDoclingEndpoint } from "../src/pdfNativeDocling";
+import { clearTranslationCheckpoints } from "../src/zoteroCheckpoint";
 
 describe("startup", function () {
+  beforeEach(() => { clearTranslationCheckpoints(); });
+  afterEach(() => { clearTranslationCheckpoints(); });
   it("should have plugin instance defined", function () {
     assert.isNotEmpty(Zotero[config.addonInstance]);
   });
@@ -575,7 +578,9 @@ ${error?.stack || ""}`);
     content.id = "sdt-content";
     const paragraph = doc.createElement("p");
     paragraph.dataset.refPath = "0";
-    paragraph.textContent = `A synthetic paragraph for translation ${Date.now()}.`;
+    const stamp = String(Date.now());
+    paragraph.textContent = `A synthetic paragraph for translation ${stamp}.`;
+    const expectedTranslation = "集成测试译文 " + stamp + "。";
     content.append(paragraph);
     doc.body.append(content);
 
@@ -607,7 +612,7 @@ ${error?.stack || ""}`);
             requestedOptions = options;
             return {
               status: "success",
-              result: "集成测试译文。",
+              result: expectedTranslation,
               service: "integration-test",
             };
           },
@@ -618,7 +623,7 @@ ${error?.stack || ""}`);
 
       const translated = doc.querySelector(".bilingual-reader-translation");
       assert.equal(shownError, "");
-      assert.equal(translated?.textContent, "集成测试译文。");
+      assert.equal(translated?.textContent, expectedTranslation);
       assert.equal(translated?.getAttribute("data-state"), "done");
       assert.notProperty(requestedOptions, "service");
     } finally {
@@ -662,7 +667,9 @@ ${error?.stack || ""}`);
     content.id = "sdt-content";
     const paragraph = doc.createElement("p");
     paragraph.dataset.refPath = "0";
-    paragraph.textContent = `A synthetic Google paragraph ${Date.now()}.`;
+    const stamp = String(Date.now());
+    paragraph.textContent = `A synthetic Google paragraph ${stamp}.`;
+    const expectedTranslation = "内置 Google 翻译成功 " + stamp + "。";
     content.append(paragraph);
     doc.body.append(content);
 
@@ -686,7 +693,7 @@ ${error?.stack || ""}`);
         requestURL = url;
         return {
           status: 200,
-          response: [[["内置 Google 翻译成功。", "source text"]]],
+          response: [[[expectedTranslation, "source text"]]],
         };
       };
 
@@ -697,7 +704,7 @@ ${error?.stack || ""}`);
       assert.equal(shownError, "");
       assert.equal(
         doc.querySelector(".bilingual-reader-translation")?.textContent,
-        "内置 Google 翻译成功。",
+        expectedTranslation,
       );
     } finally {
       await toggleBilingualReading(reader);
@@ -917,7 +924,9 @@ ${error?.stack || ""}`);
     content.id = "sdt-content";
     const paragraph = doc.createElement("p");
     paragraph.dataset.refPath = "0";
-    paragraph.textContent = `A synthetic Ollama paragraph ${Date.now()}.`;
+    const stamp = String(Date.now());
+    paragraph.textContent = `A synthetic Ollama paragraph ${stamp}.`;
+    const expectedTranslation = "Ollama 集成测试译文 " + stamp + "。";
     content.append(paragraph);
     doc.body.append(content);
 
@@ -939,7 +948,7 @@ ${error?.stack || ""}`);
         requestedURL = url;
         return {
           status: 200,
-          response: { message: { content: "Ollama 集成测试译文。" } },
+          response: { message: { content: expectedTranslation } },
         };
       };
 
@@ -947,7 +956,7 @@ ${error?.stack || ""}`);
 
       const translated = doc.querySelector(".bilingual-reader-translation");
       assert.match(requestedURL, /\/api\/chat$/u);
-      assert.equal(translated?.textContent, "Ollama 集成测试译文。");
+      assert.equal(translated?.textContent, expectedTranslation);
       assert.equal(translated?.getAttribute("data-state"), "done");
     } finally {
       await toggleBilingualReading(reader);

@@ -81,7 +81,7 @@ describe("native Zotero reading-mode highlight layout", function () {
         content: [
           {
             type: "paragraph",
-            content: [{ text: "A source paragraph before the highlighted passage." }],
+            content: [{ text: "Synthetic reader layout test." }],
             anchor: { pageRects: [[0, 49, 696, 202, 713]] },
           },
           { type: "paragraph", content: [{ text: "Highlighted original text remains aligned." }] },
@@ -173,14 +173,27 @@ describe("native Zotero reading-mode highlight layout", function () {
     });
     const button = toolbarDoc.querySelector("button")!;
     button.click();
+    assert.equal(button.getAttribute("aria-busy"), "true");
+    assert.isFalse(button.disabled, "Export must remain cancellable before import");
     return button;
   }
 
   async function waitForPrinter(button: HTMLButtonElement, timeout = 20000): Promise<void> {
     const deadline = Date.now() + timeout;
-    while (button.disabled && Date.now() < deadline) await Zotero.Promise.delay(100);
-    assert.isFalse(button.disabled, "Printer action did not finish: " + button.title);
+    while (button.getAttribute("aria-busy") === "true" && Date.now() < deadline) await Zotero.Promise.delay(100);
+    assert.notEqual(button.getAttribute("aria-busy"), "true", "Printer action did not finish: " + button.title);
+    assert.isFalse(button.disabled, "Printer button did not recover: " + button.title);
   }
+
+  nativeTest("cancels a toolbar export before attachment import and restores the control", async () => {
+    const before = parent.getAttachments();
+    const alerts: string[] = [];
+    const button = printFromToolbar(alerts);
+    button.click();
+    await waitForPrinter(button);
+    assert.deepEqual(parent.getAttachments(), before, "Cancel must not create an attachment");
+    assert.equal(button.textContent, "🖨️");
+  });
 
   nativeTest("the default stacked export ignores the removed appendix preference and still embeds figures", async () => {
     const figure = doc.querySelector<HTMLElement>("figure.sdt-source-crop")!;
