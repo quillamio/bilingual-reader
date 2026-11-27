@@ -5,10 +5,11 @@
 import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getMixedRouteCacheTag,
   getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, type PDFExportLayout } from "./settings";
 import { saveCachedTranslation } from "./translationCache";
-import { buildBatchPayload, packBatchItems, parseBatchResult, splitTextForRequest,
+import { buildBatchPayload, packBatchItems, parseBatchResult,
   type BatchInput } from "./translationPipeline";
 import { translateTextRouted, loadRoutedCachedTranslation } from "./bilingualReader";
 import { TranslationCancelledError } from "./translationRouter";
+import { isScientificPreserveOnly, validScientificTranslation, splitScientificText } from "./scientificText";
 import { printHTMLToPDF, importExportedPDF } from "./readerUI";
 import { PDFPrintTimeoutError } from "./pdfExportUtils";
 import { PDFOperationTimeoutError, withPDFOperationDeadline } from "./pdfOperationDeadline";
@@ -26,11 +27,7 @@ import { isBodyText, joinPDFLines, normalizedSource, uncoveredBlocks } from "./p
 import type { MinerUReadingResult } from "./pdfNativeReadingPanel";
 
 const active = new WeakSet<object>();
-const isFailure = (value: string) => !value.trim() ||
-  /^\[请求错误\]|HTTP\s+\d{3}|此翻译服务不可用/iu.test(value.trim());
-const isUntranslated = (source: string, result: string): boolean =>
-  isFailure(result) || ((source.match(/[A-Za-z]{2,}/gu)?.length || 0) >= 5 &&
-    normalizedSource(source) === normalizedSource(result));
+const isUntranslated = (source: string, result: string): boolean => !validScientificTranslation(source, result);
 const canTranslate = (block: NativeBlock) =>
   block.text.length >= 2 &&
   ["paragraph", "heading", "caption", "table", "footnote"].includes(block.type);
@@ -57,20 +54,22 @@ function progress(button: HTMLButtonElement | null, text: string): void {
 async function translateSegment(
   text: string, itemID: number, engine: ReturnType<typeof getEngine>, task?: PDFExportTask,
 ): Promise<{ text: string; tag: string }> {
-  const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
+  const chunks = splitScientificText(text, getMaxCharsPerRequest());
   const translated: string[] = [];
   const tags = new Set<string>();
   for (const chunk of chunks) {
     try {
-      const response = await translateTextRouted(chunk, itemID, engine, task, result => !isUntranslated(chunk, result));
+      const response = await translateTextRouted(chunk, itemID, engine, task);
       translated.push(response.text);
-      tags.add(response.engineTag);
+      if (response.engineTag !== "scientific:preserved") tags.add(response.engineTag);
     } catch (error) {
       if (error instanceof TranslationCancelledError || task?.cancelled) throw new PDFExportCancelledError();
       throw error;
     }
   }
-  return { text: translated.join(" ").trim(), tag: tags.size === 1 ? [...tags][0] : getMixedRouteCacheTag(engine) };
+  const result = translated.join(" ").trim();
+  if (isUntranslated(text, result)) throw new Error("合并译文未通过科学文本校验。");
+  return { text: result, tag: tags.size === 1 ? [...tags][0] : getMixedRouteCacheTag(engine) };
 }
 
 export async function translateNativeDocument(
@@ -94,6 +93,7 @@ export async function translateNativeDocument(
       if (!canTranslate(block)) continue;
       const text = block.source === "pdfjs" && block.lineTexts?.length
         ? joinPDFLines(block.lineTexts) : block.text;
+      if (isScientificPreserveOnly(text)) { translated.set(block.id, text); continue; }
       const cached = loadRoutedCachedTranslation(itemKey, text, engine, result => isUntranslated(text, result));
       if (cached) translated.set(block.id, cached);
       else pending.push({ ...block, text });
@@ -109,11 +109,12 @@ export async function translateNativeDocument(
     let batchTag = engineTag;
     if (job.length > 1) {
       try {
-        const batch = await translateSegment(buildBatchPayload(job), itemID, engine, task);
+        const batch = await translateTextRouted(buildBatchPayload(job), itemID, engine, task, true);
         batchResults = parseBatchResult(batch.text, job.length);
-        batchTag = batch.tag;
+        batchTag = batch.engineTag;
       } catch (error) {
         // The old request may still be running; do not launch another one on timeout.
+        if (error instanceof TranslationCancelledError || task?.cancelled) throw new PDFExportCancelledError();
         if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
         Zotero.logError(error as Error);
       }
@@ -126,7 +127,7 @@ export async function translateNativeDocument(
           ? { text: fromBatch, tag: batchTag }
           : await translateSegment(block.text, itemID, engine, task);
         translated.set(block.id, result);
-        saveCachedTranslation(itemKey, block.text, result, tag || engineTag, isFailure);
+        saveCachedTranslation(itemKey, block.text, result, tag || engineTag, value => isUntranslated(block.text, value));
         consecutiveFailures = 0;
       } catch (error) {
         if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
@@ -198,6 +199,7 @@ export async function supplementReadingPDFPages(
     };
     const before = missingCount;
     const paragraphs = page.blocks.flatMap(block => {
+      if (isScientificPreserveOnly(block.lineTexts?.length ? joinPDFLines(block.lineTexts) : block.text)) return [];
       const text = reused.get(block.id) || translated.get(block.id);
       if (!text) {
         missingCount++;
@@ -399,6 +401,7 @@ export async function exportNativePDFBilingual(
       const note = await saveSideBySidePDF(reader, attachment, parsed.pages.map(page => ({
         pageIndex: page.index,
         paragraphs: page.blocks.flatMap(block => {
+          if (isScientificPreserveOnly(block.source === "pdfjs" && block.lineTexts?.length ? joinPDFLines(block.lineTexts) : block.text)) return [];
           const text = translated.get(block.id);
           return text ? [{ text, heading: block.type === "heading", rects: block.lineRects || [] }] : [];
         }),
@@ -410,7 +413,7 @@ export async function exportNativePDFBilingual(
 
     const exportPages: NativeExportPage[] = parsed.pages.map(page => ({
       pageIndex: page.index,
-      blocks: page.blocks.filter(canTranslate).map(block => ({
+      blocks: page.blocks.filter(block => canTranslate(block) || block.type === "formula").map(block => ({
         block, translation: translated.get(block.id) || "",
       })),
     }));

@@ -1,4 +1,5 @@
 import type { NativeBlock, NativeParser } from "./pdfNativeModel";
+import { isScientificPreserveOnly } from "./scientificText.ts";
 
 export interface NativeExportPage {
   pageIndex: number;
@@ -17,6 +18,7 @@ export function buildNativeBilingualHTML(
   const pageMarkup = pages.map(({ pageIndex, blocks }) => {
     const paragraphs = blocks.map(({ block, translation }) => {
       const enTag = block.type === "heading" ? "h3" : "p";
+      if (block.type === "formula" || isScientificPreserveOnly(block.text)) return `<div class="unit"><${enTag} class="en">${escapeHTML(block.text)}</${enTag}></div>`;
       return `<div class="unit"><${enTag} class="en">${escapeHTML(block.text)}</${enTag}><p class="zh">${escapeHTML(translation || "〔此段未翻译〕")}</p></div>`;
     }).join("\n");
     return '<section class="translation-page" data-page="' + (pageIndex + 1) + '">' +

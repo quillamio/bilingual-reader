@@ -31,10 +31,10 @@ import {
   buildBatchPayload,
   packBatchItems,
   parseBatchResult,
-  splitTextForRequest,
   type BatchInput,
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
+import { isScientificPreserveOnly, validScientificTranslation, splitScientificText, translateScientificRequest } from "./scientificText";
 import { TranslationRouter, TranslationCancelledError, translationHTTPError, type RouterCancellation } from "./translationRouter";
 import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
 import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
@@ -143,7 +143,7 @@ async function translateWithOllama(text: string): Promise<TranslationResponse> {
       {
         role: "system",
         content:
-          "你是专业的生物医学论文翻译助手。把用户提供的英文准确翻译为简体中文。保留基因、蛋白、药物、统计学符号、数字、单位、图表编号和文献引用；不要总结，不要解释，不要添加前言，只输出译文。如果出现 [[BRSEG_0000]] 这类分段标记，必须逐字原样保留标记及其顺序。",
+          "你是专业的生物医学论文翻译助手。把用户提供的英文准确翻译为简体中文。保留基因、蛋白、药物、统计学符号、数字、单位、图表编号和文献引用；不要总结，不要解释，不要添加前言，只输出译文。如果出现 [[BRSEG_0000]] 或 [[BRSCI_0000]] 这类标记，必须逐字原样保留，不遗漏或重复。",
       },
       {
         role: "user",
@@ -205,21 +205,28 @@ const translationRouter = new TranslationRouter();
 
 export async function translateTextRouted(
   text: string, itemID: number, primary: TranslationEngine, cancellation?: RouterCancellation,
-  validate?: (result: string) => boolean,
+  batch = false,
 ): Promise<TranslationResponse> {
-  return translationRouter.translate({
+  const route = (payload: string, accept: (result: string) => string | undefined) => translationRouter.translate({
     engines: getRouteEngines(primary).map(id => ({
       id, group: getRouteProviderGroup(id),
       gapMs: Math.max(getRequestGapMs(), getServiceDefinition(id)?.group === "free" || id === "pdftranslate" ? 1000 : 0),
     })),
     timeoutMs: getRequestTimeoutMs(), cancellation,
     request: async id => {
-      try { return await translateText(text, itemID, id); }
+      try { return await translateText(payload, itemID, id); }
       catch (error) { throw translationHTTPError(error) || error; }
     },
-    validate: response => !isFailureText(response.text) && !/^HTTP\s+[45]\d\d/u.test(response.text.trim()) &&
-      (validate ? validate(response.text) : true),
+    validate: response => {
+      if (isFailureText(response.text) || /^HTTP\s+[45]\d\d/u.test(response.text.trim())) return false;
+      const checked = accept(response.text);
+      if (checked === undefined) return false;
+      response.text = checked;
+      return true;
+    },
   });
+  if (batch) return route(text, value => value);
+  return translateScientificRequest(text, route, getMaxCharsPerRequest(), () => Boolean(cancellation?.cancelled));
 }
 
 export function loadRoutedCachedTranslation(
@@ -237,7 +244,7 @@ async function translateTextLimited(
   request: (chunk: string) => Promise<TranslationResponse>,
   engine: TranslationEngine,
 ): Promise<TranslationResponse> {
-  const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
+  const chunks = splitScientificText(text, getMaxCharsPerRequest());
   if (chunks.length === 1) {
     return request(chunks[0]);
   }
@@ -247,9 +254,11 @@ async function translateTextLimited(
   for (const chunk of chunks) {
     const response = await request(chunk);
     translated.push(response.text);
-    tags.add(response.engineTag);
+    if (response.engineTag !== "scientific:preserved") tags.add(response.engineTag);
   }
-  return { text: translated.join(" ").trim(), engineTag: tags.size === 1 ? [...tags][0] : getMixedRouteCacheTag(engine) };
+  const result = translated.join(" ").trim();
+  if (!validScientificTranslation(text, result)) throw new Error("合并译文未通过科学文本校验。");
+  return { text: result, engineTag: tags.size === 1 ? [...tags][0] : getMixedRouteCacheTag(engine) };
 }
 
 function getInternalReader(reader: any): any {
@@ -484,7 +493,7 @@ function collectParagraphs(
     if (!isTranslatableElement(element)) continue;
 
     const sourceText = (element.textContent || "").replace(/\s+/g, " ").trim();
-    if (sourceText.length < 2) continue;
+    if (sourceText.length < 2 || isScientificPreserveOnly(sourceText)) continue;
 
     const refPath = element.dataset.refPath || "";
     const pageIndex = getPageIndexForRef(structure, refPath);
@@ -499,7 +508,7 @@ function collectParagraphs(
       sourceText,
       sourceElement: element,
       pageIndex,
-      translation: loadCachedTranslation(itemKey, sourceText, engineTag, isFailureText) || loadRoutedCachedTranslation(itemKey, sourceText, getEngine(), isFailureText) || "",
+      translation: loadCachedTranslation(itemKey, sourceText, engineTag, value => !validScientificTranslation(sourceText, value)) || loadRoutedCachedTranslation(itemKey, sourceText, getEngine(), value => !validScientificTranslation(sourceText, value)) || "",
     });
   }
 
@@ -644,9 +653,9 @@ async function translateParagraphs(
   let completed = 0;
   let failureStreak = 0;
   let aborted = false;
-  const request = async (text: string): Promise<TranslationResponse> => {
+  const request = async (text: string, batch = false): Promise<TranslationResponse> => {
     if (!isCurrentRun(reader, generation, doc)) throw new RunCancelledError();
-    return translateTextRouted(text, itemID, engine, cancellation);
+    return translateTextRouted(text, itemID, engine, cancellation, batch);
   };
 
   const translateJob = async (
@@ -657,12 +666,14 @@ async function translateParagraphs(
       return [{ paragraphIndex: job[0].paragraphIndex, response }];
     }
 
-    const batchResponse = await request(buildBatchPayload(job));
-    const parsed = parseBatchResult(batchResponse.text, job.length);
-    if (parsed) {
+    let batchResponse: TranslationResponse | undefined;
+    try { batchResponse = await request(buildBatchPayload(job), true); }
+    catch (error) { if (isCancellationError(error)) throw error; }
+    const parsed = batchResponse ? parseBatchResult(batchResponse.text, job.length) : null;
+    if (parsed && batchResponse && parsed.every((value, index) => validScientificTranslation(job[index].text, value))) {
       return job.map((item, index) => ({
         paragraphIndex: item.paragraphIndex,
-        response: { text: parsed[index], engineTag: batchResponse.engineTag },
+        response: { text: parsed[index], engineTag: batchResponse!.engineTag },
       }));
     }
 
@@ -703,7 +714,7 @@ async function translateParagraphs(
             paragraph.sourceText,
             response.text,
             response.engineTag || engineTag,
-            isFailureText,
+            value => !validScientificTranslation(paragraph.sourceText, value),
           );
 
           const liveBlock = paragraph.block;
