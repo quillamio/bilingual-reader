@@ -126,3 +126,21 @@ export async function buildDirectRightPage(
   }
   return { bytes, continuation, placed, remaining };
 }
+
+/** Compatibility printing must not depend on installed system CJK fonts. */
+export async function addPrintCJKFont(html: string, task?: PDFExportTask): Promise<string> {
+  if (!/\p{Script=Han}/u.test(html)) return html;
+  task?.throwIfCancelled();
+  const text = [...new Set(html.match(/[\u0080-\u{10ffff}]/gu) || [])].join("");
+  const subset = subsetFont(await loadBundledFont(task), {text, familyName:"BilingualReaderPrintCJK"});
+  const ranges = subset.mappedCodepoints.filter(cp=>cp>=128).map(cp=>"U+"+cp.toString(16)).join(",");
+  if (!ranges) return html;
+  const chunks: string[]=[];
+  for (let i=0;i<subset.font.length;i+=32768) chunks.push(String.fromCharCode(...subset.font.subarray(i,i+32768)));
+  const data=Zotero.getMainWindow().btoa(chunks.join(""));
+  const css='<style>@font-face{font-family:BRPrintCJK;src:url(data:font/ttf;base64,'+data+') format("truetype");unicode-range:'+ranges+';font-display:block;}body,body *{font-family:BRPrintCJK,Arial,"PingFang SC","Microsoft YaHei",sans-serif !important;}</style>';
+  const policy=html.replace(/(<meta http-equiv="Content-Security-Policy" content=")([^"]*)(")/iu,
+    (_,prefix,content,suffix)=>prefix+(/\bfont-src\b/u.test(content)?content:content+"; font-src data:")+suffix);
+  if (!/<\/head>/iu.test(policy)) throw new Error("兼容打印 HTML 缺少 head。");
+  return policy.replace(/<\/head>/iu,css+"</head>");
+}

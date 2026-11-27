@@ -183,3 +183,5 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 
 ### 字形子集兼容性修复
 旧版 @pdf-lib/fontkit 的 CJK 子集生成在实际 PDF 中导致可检索但不可见的字符（OTF/TTF 均已复现）。引入 [notofu](https://github.com/Ax1zz/notofu/tree/123ebf7d53b194f16c477e73a50a67bea0b5c0fc) 的纯 TrueType 子集核心（MIT，固定提交，仅五个源码文件，本地改动仅导入扩展名及来源声明），先生成有效字体子集再通过 pdf-lib subset:false 嵌入。字体子集采用 BilingualReaderCJK 名称；Noto 原字体 OFL 授权仍适用。notofu 原始 MIT 授权见 addon/content/licenses/notofu.txt。保留真实字形像素和续页验收，不以文字提取替代可见性。
+
+兼容打印路径也内嵌同源中文 TrueType 子集，使用本地 HTML data: 字体，不依赖操作系统安装中文字体，不联网。超出字体覆盖的符号仍由 Gecko 系统字体回退；继续检查真实中文可检索性及像素。

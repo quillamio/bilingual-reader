@@ -389,6 +389,10 @@ export async function printHTMLToPDF(
     throw new Error("无法取得 Zotero 的 PDF 打印设置。");
   }
 
+  if (/\p{Script=Han}/u.test(html)) {
+    const { addPrintCJKFont } = await import("./pdfDirectExport");
+    html = await addPrintCJKFont(html, task);
+  }
   const HiddenBrowser = getHiddenBrowserConstructor();
   const browser = new HiddenBrowser({ useHiddenFrame: false });
   const htmlFile = Zotero.getTempDirectory();

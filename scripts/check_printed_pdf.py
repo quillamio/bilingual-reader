@@ -169,7 +169,10 @@ for name, anchor, chinese in [
         sheet = fallback[0]
         right = fitz.Rect(sheet.rect.width / 2, 0, sheet.rect.width, sheet.rect.height)
         assert anchor in sheet.get_text(clip=right)
-        assert chinese in sheet.get_text(clip=right)
+        assert chinese in sheet.get_text(clip=right), f"Missing Chinese in {name}"
+        for rect in sheet.search_for(chinese):
+            pix = sheet.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect, alpha=False)
+            assert sum(max(pixel) < 160 for pixel in zip(pix.samples[0::pix.n], pix.samples[1::pix.n], pix.samples[2::pix.n])) > 8
         rects = sheet.search_for(anchor)
         assert len(rects) == 1 and right.contains(rects[0])
         pix = sheet.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rects[0], alpha=False)
