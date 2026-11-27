@@ -1,3 +1,6 @@
+import type { PDFExportTask } from "./pdfExportTask.ts";
+import { PDFExportCancelledError } from "./pdfExportTask.ts";
+
 /** Filename and PDF signature checks for Zotero's bilingual PDF export. */
 export function sanitizeExportFileBaseName(value: string, maxBytes = 180): string {
   const safeCharacters = Array.from(value.replace(/\.pdf$/i, ""), (character) => {
@@ -135,15 +138,36 @@ export class PDFPrintTimeoutError extends Error {
 
 /** Bound Gecko's print promise; the caller owns browser and temporary-file cleanup. */
 export async function withPDFPrintDeadline<T>(
-  print: () => Promise<T>, timeoutMs: number,
+  print: () => Promise<T>, timeoutMs: number, task?: PDFExportTask,
+  cleanupLateOutput?: () => void,
 ): Promise<T> {
+  task?.throwIfCancelled();
+  let unsubscribe: (() => void) | undefined;
+  let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new PDFPrintTimeoutError(timeoutMs)), timeoutMs);
+      const stop = (error: Error) => {
+        if (stopped) return;
+        stopped = true;
+        reject(error);
+      };
+      timer = setTimeout(() => stop(new PDFPrintTimeoutError(timeoutMs)), timeoutMs);
+      unsubscribe = task?.onCancel(() => stop(new PDFExportCancelledError()));
     });
-    return await Promise.race([deadline, Promise.resolve().then(print)]);
+    const result = await Promise.race([deadline, Promise.resolve().then(async () => {
+      task?.throwIfCancelled();
+      try { return await print(); }
+      finally {
+        if (stopped) {
+          try { cleanupLateOutput?.(); } catch (_) { /* Best-effort late cleanup. */ }
+        }
+      }
+    })]);
+    task?.throwIfCancelled();
+    return result;
   } finally {
+    unsubscribe?.();
     if (timer !== undefined) clearTimeout(timer);
   }
 }

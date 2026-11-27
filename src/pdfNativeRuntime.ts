@@ -9,6 +9,7 @@
  */
 import { extractPDFJSPage, type NativeDocument, type PDFJSTextItem } from "./pdfNativeModel";
 import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline } from "./pdfOperationDeadline";
+import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
 
 interface PDFProxyHandle {
   pdf: any;
@@ -88,7 +89,7 @@ function cloneForWindow<T>(value: T, target: any): T {
   } catch (_) { /* Same-origin/same compartment may not need cloneInto. */ }
   return value;
 }
-async function pdfFontWeights(page: any, items: any): Promise<Map<string, boolean>> {
+async function pdfFontWeights(page: any, items: any, task?: PDFExportTask): Promise<Map<string, boolean>> {
   const fonts = unwrapPDFObject(page.commonObjs);
   const weights = new Map<string, boolean>();
   if (!fonts?.has || !items?.length) return weights;
@@ -99,9 +100,9 @@ async function pdfFontWeights(page: any, items: any): Promise<Map<string, boolea
   }
   if ([...names].some(name => !fonts.has(name)) && typeof page.getOperatorList === "function") {
     try {
-      await withPDFOperationDeadline("PDF.js 字体信息读取", PDF_DEADLINES.font, () => page.getOperatorList());
+      await withPDFOperationDeadline("PDF.js 字体信息读取", PDF_DEADLINES.font, () => page.getOperatorList(), undefined, task);
     } catch (error) {
-      if (error instanceof PDFOperationTimeoutError) throw error;
+      if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
       // Keep geometry when font data is unavailable.
     }
   }
@@ -119,7 +120,7 @@ export async function parseNormalPDFWithPDFJS(
   { pdf }: PDFProxyHandle,
   onProgress?: (progress: NativePDFProgress) => void,
   isCancelled?: () => boolean,
-  preserveTypography = false,
+  preserveTypography = false, task?: PDFExportTask,
 ): Promise<NativeDocument> {
   if (!pdf?.getPage || !Number.isInteger(pdf.numPages) || pdf.numPages < 1) {
     throw new Error("无法访问原始 PDF.js 文档，请先打开普通 PDF 页面视图。");
@@ -127,7 +128,7 @@ export async function parseNormalPDFWithPDFJS(
   const pages = [];
   const warnings: string[] = [];
   for (let index = 0; index < pdf.numPages; index++) {
-    if (isCancelled?.()) break;
+    if (isCancelled?.() || task?.cancelled) throw new PDFExportCancelledError();
     onProgress?.({ page: index + 1, pages: pdf.numPages, stage: "parse" });
     // Awaiting a PDF.js promise from the add-on scope can wrap its page in an
     // Xray that hides custom prototype methods. Use the page's viewer scope.
@@ -135,18 +136,18 @@ export async function parseNormalPDFWithPDFJS(
     let page: any;
     try {
       page = unwrapPDFObject(await withPDFOperationDeadline("PDF.js 页面加载", PDF_DEADLINES.page,
-        () => pdf.getPage(index + 1)));
-      if (isCancelled?.()) break;
+        () => pdf.getPage(index + 1), undefined, task));
+      if (isCancelled?.() || task?.cancelled) throw new PDFExportCancelledError();
       stage = "读取页面尺寸";
       const geometry = pdfPageGeometry(page);
       stage = "提取文字";
       const content = unwrapPDFObject(await withPDFOperationDeadline("PDF.js 文本提取", PDF_DEADLINES.text,
-        () => page.getTextContent()));
+        () => page.getTextContent(), undefined, task));
       stage = "整理文字坐标";
       const items: PDFJSTextItem[] = [];
       const source = content?.items;
       stage = "读取字体信息";
-      const weights = preserveTypography ? await pdfFontWeights(page, source) : undefined;
+      const weights = preserveTypography ? await pdfFontWeights(page, source, task) : undefined;
       stage = "整理文字坐标";
       for (let i = 0; i < (source?.length || 0); i++) {
         const item = source[i];
@@ -165,9 +166,10 @@ export async function parseNormalPDFWithPDFJS(
       }
       pages.push({ ...native, layout: { width: geometry.width, height: geometry.height, transform: geometry.transform } });
     } catch (error) {
+      if (error instanceof PDFExportCancelledError) throw error;
       throw new Error(`第 ${index + 1} 页${stage}失败：${String(error)}`);
     } finally {
-      page?.cleanup?.();
+      try { page?.cleanup?.(); } catch (_) { /* Do not mask cancellation. */ }
     }
   }
   return { source: "pdfjs", pages, warnings };
@@ -177,10 +179,10 @@ export async function snapshotPDFPage(
   pageIndex: number,
   doc: Document,
   contentWindow: any,
-  scale = 1.25,
+  scale = 1.25, exportTask?: PDFExportTask,
 ): Promise<string> {
   const page = await withPDFOperationDeadline<any>("PDF.js 页面加载", PDF_DEADLINES.page,
-    () => pdf.getPage(pageIndex + 1));
+    () => pdf.getPage(pageIndex + 1), undefined, exportTask);
   const viewport = page.getViewport(cloneForWindow({ scale }, contentWindow));
   // Keep canvas and PDF.js rendering context in the viewer's compartment
   // when possible. Firefox's Xray wrappers may reject a canvas context that
@@ -202,7 +204,7 @@ export async function snapshotPDFPage(
       canvasContext: context, viewport, background: "rgb(255,255,255)",
     }, contentWindow));
     await withPDFOperationDeadline("PDF.js 页面渲染", PDF_DEADLINES.render,
-      () => task.promise, () => task.cancel?.());
+      () => task.promise, () => task.cancel?.(), exportTask);
     const image = canvas.toDataURL("image/jpeg", 0.83);
     if (!image.startsWith("data:image/jpeg;base64,") || image.length < 64) {
       throw new Error("PDF.js 页面绘制结果无效。");
@@ -211,11 +213,11 @@ export async function snapshotPDFPage(
   } finally {
     canvas.width = 0;
     canvas.height = 0;
-    page.cleanup?.();
+    try { page.cleanup?.(); } catch (_) { /* Do not mask the render error. */ }
   }
 }
 /** Retry one region without using the SDT view's shared render batch. */
-export async function renderPDFRegion(reader: any, pageIndex: number, rect: number[]): Promise<string> {
+export async function renderPDFRegion(reader: any, pageIndex: number, rect: number[], task?: PDFExportTask): Promise<string> {
   const internal = reader?._internalReader || reader;
   const baseView = internal?._lastViewPrimary !== false || !internal?._secondaryView
     ? internal?._primaryView : internal._secondaryView;
@@ -223,7 +225,7 @@ export async function renderPDFRegion(reader: any, pageIndex: number, rect: numb
   if (typeof renderer?.renderRegionCrops !== "function") return "";
   const scope = baseView?._iframe?.ownerDocument?.defaultView || internal?._iframeWindow || reader?._iframeWindow;
   const images = await withPDFOperationDeadline<any>("PDF.js 区域渲染", PDF_DEADLINES.render,
-    () => renderer.renderRegionCrops(pageIndex, cloneForWindow([rect], scope)));
+    () => renderer.renderRegionCrops(pageIndex, cloneForWindow([rect], scope)), undefined, task);
   const png = images?.[0];
   return typeof png === "string" && png.startsWith("data:image/png;base64,") ? png : "";
 }
@@ -251,11 +253,11 @@ function pdfPageGeometry(page: any) {
   };
 }
 
-export async function getPDFPageLayout(reader: any, pageIndex: number) {
+export async function getPDFPageLayout(reader: any, pageIndex: number, task?: PDFExportTask) {
   const handle = getNormalPDFProxy(reader);
   if (!handle) throw new Error("无法读取原始 PDF 的页面坐标。");
   return pdfPageGeometry(unwrapPDFObject(await withPDFOperationDeadline("PDF.js 页面坐标加载",
-    PDF_DEADLINES.page, () => handle.pdf.getPage(pageIndex + 1))));
+    PDF_DEADLINES.page, () => handle.pdf.getPage(pageIndex + 1), undefined, task)));
 }
 
 export async function getOriginalPDFBytes(pdf: any): Promise<Uint8Array> {

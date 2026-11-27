@@ -1,4 +1,5 @@
 import { PDF_DEADLINES, withPDFOperationDeadline } from "./pdfOperationDeadline";
+import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
 /**
  * Freeze images in the current SDT reader before printing its cloned HTML.
  *
@@ -29,7 +30,7 @@ function exportElements<T extends Element>(root: HTMLElement, selector: string):
 }
 
 /** Ask the native SDT view to render offscreen source crops before cloning. */
-export async function preparePDFExportFigures(view: any, root: HTMLElement, reader: any): Promise<void> {
+export async function preparePDFExportFigures(view: any, root: HTMLElement, reader: any, task?: PDFExportTask): Promise<void> {
   const pending = exportElements<HTMLElement>(
     root, 'figure.sdt-source-crop[data-source-crop-state="ready"], ' +
       'figure.sdt-source-crop[data-source-crop-state="loading"], ' +
@@ -37,6 +38,7 @@ export async function preparePDFExportFigures(view: any, root: HTMLElement, read
       'figure.sdt-source-crop[data-source-crop-state="loaded"]',
   );
   for (const figure of pending) {
+    task?.throwIfCancelled();
     let expired = false;
     const render = async () => {
       if (figure.dataset.sourceCropState === "ready") await view?._loadSourceCrop?.(figure);
@@ -46,19 +48,14 @@ export async function preparePDFExportFigures(view: any, root: HTMLElement, read
       }
       if (!expired) await recoverReadingFigure(reader, view, figure, () => expired);
     };
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        render(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("原始 PDF 图表提取超时。")), 20000);
-        }),
-      ]);
+      await withPDFOperationDeadline("原始 PDF 图表提取", 20000, render,
+        () => { expired = true; }, task);
     } catch (error) {
+      if (error instanceof PDFExportCancelledError) throw error;
       Zotero.logError(error as Error);
     } finally {
       expired = true;
-      if (timer !== undefined) clearTimeout(timer);
     }
   }
 }
@@ -163,7 +160,7 @@ function isCaptionWithoutNearbyImage(caption: Element): boolean {
  */
 export async function freezePDFExportImages(
   source: HTMLElement,
-  clone: HTMLElement,
+  clone: HTMLElement, task?: PDFExportTask,
 ): Promise<ExportAssetReport> {
   const originalImages = exportElements<HTMLImageElement>(source, "img");
   const cloneImages = exportElements<HTMLImageElement>(clone, "img");
@@ -183,6 +180,7 @@ export async function freezePDFExportImages(
   let totalBytes = 0;
   const count = Math.min(originalImages.length, cloneImages.length);
   for (let i = 0; i < count; i++) {
+    task?.throwIfCancelled();
     const original = originalImages[i];
     const target = cloneImages[i];
     const src = normalizeSrc(original);
@@ -198,7 +196,8 @@ export async function freezePDFExportImages(
     try {
       const doc = original.ownerDocument;
       if (!doc) throw new Error("Image element has no owner document.");
-      const { body, mime } = await loadImageBytes(src, doc);
+      const { body, mime } = await withPDFOperationDeadline("阅读模式图像提取", PDF_DEADLINES.image,
+        () => loadImageBytes(src, doc), undefined, task);
       if (!body.byteLength || body.byteLength > MAX_EMBEDDED_IMAGE_BYTES ||
         totalBytes + body.byteLength > MAX_TOTAL_IMAGE_BYTES) {
         throw new Error("Image exceeds export size limit.");
@@ -206,7 +205,8 @@ export async function freezePDFExportImages(
       totalBytes += body.byteLength;
       setEmbeddedImage(target, "data:" + mime + ";base64," + bufferToBase64(body));
       report.embedded++;
-    } catch (_) {
+    } catch (error) {
+      if (error instanceof PDFExportCancelledError) throw error;
       // Do not export a dead reader-only blob URL into HiddenBrowser.
       if (/^blob:/iu.test(src)) target.removeAttribute("src");
       report.failed++;
@@ -217,6 +217,7 @@ export async function freezePDFExportImages(
   }
 
   for (let i = 0; i < Math.min(originalCanvases.length, cloneCanvases.length); i++) {
+    task?.throwIfCancelled();
     const original = originalCanvases[i];
     const target = cloneCanvases[i];
     try {
@@ -248,6 +249,7 @@ export async function freezePDFExportImages(
   const svgImages = exportElements<Element>(source, "svg image");
   const targetSvgImages = exportElements<Element>(clone, "svg image");
   for (let i = 0; i < Math.min(svgImages.length, targetSvgImages.length); i++) {
+    task?.throwIfCancelled();
     const original = svgImages[i];
     const target = targetSvgImages[i];
     const raw = original.getAttribute("href") ||
@@ -261,7 +263,8 @@ export async function freezePDFExportImages(
       const uri = new URL(raw, original.ownerDocument?.baseURI || "about:blank").href;
       const owner = original.ownerDocument;
       if (!owner) throw new Error("SVG has no document.");
-      const { body, mime } = await loadImageBytes(uri, owner);
+      const { body, mime } = await withPDFOperationDeadline("SVG 图像提取", PDF_DEADLINES.image,
+        () => loadImageBytes(uri, owner), undefined, task);
       if (!body.byteLength || body.byteLength > MAX_EMBEDDED_IMAGE_BYTES ||
           totalBytes + body.byteLength > MAX_TOTAL_IMAGE_BYTES) {
         throw new Error("SVG image is too large.");
@@ -271,9 +274,11 @@ export async function freezePDFExportImages(
       target.setAttribute("href", embedded);
       target.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", embedded);
       report.embedded++;
-    } catch (_) {
+    } catch (error) {
+      if (error instanceof PDFExportCancelledError) throw error;
       report.failed++;
     }
   }
+  task?.throwIfCancelled();
   return report;
 }

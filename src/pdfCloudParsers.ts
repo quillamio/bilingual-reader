@@ -4,7 +4,8 @@
  * prevent accidental key disclosure to arbitrary hosts.
  */
 import type { NativeDocument } from "./pdfNativeModel";
-import { PDF_DEADLINES, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
+import { PDF_DEADLINES, writeTemporaryWithDeadline, waitForPDFExport } from "./pdfOperationDeadline";
+import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
 import { CLOUD_NAMES, normalizeMinerU, normalizeMarkdownPages, type CloudParser } from "./pdfCloudModel";
 
 const PREF = "extensions.zotero.bilingualreader.native.cloud.";
@@ -78,7 +79,7 @@ function signedURL(value: unknown): string {
   }
   return url.href;
 }
-async function readMinerUZip(buffer: ArrayBuffer): Promise<unknown> {
+async function readMinerUZip(buffer: ArrayBuffer, task?: PDFExportTask): Promise<unknown> {
   if (!buffer || buffer.byteLength < 4 || buffer.byteLength > 160 * 1024 * 1024) {
     throw new Error("MinerU ZIP 文件为空或超过 160 MB。");
   }
@@ -94,7 +95,7 @@ async function readMinerUZip(buffer: ArrayBuffer): Promise<unknown> {
     stream.setData(buffer, 0, buffer.byteLength);
     await writeTemporaryWithDeadline("MinerU ZIP 临时文件写入", PDF_DEADLINES.fileWrite,
       () => (Zotero.File as any).putContentsAsync(file.path, stream),
-      () => { if (file.exists()) file.remove(false); });
+      () => { if (file.exists()) file.remove(false); }, task);
     zip.open(file);
     opened = true;
     // Read only the bounded JSON entry, never unpack arbitrary archive paths.
@@ -133,14 +134,14 @@ function cancelled(check?: () => boolean): void {
   if (check?.()) throw new Error("PDF 解析已取消。");
 }
 async function poll<T>(read: () => Promise<T | undefined>,
-  check?: () => boolean): Promise<T> {
+  check?: () => boolean, task?: PDFExportTask): Promise<T> {
   const deadline = Date.now() + 12 * 60 * 1000;
   while (Date.now() < deadline) {
     cancelled(check);
     const result = await read();
     cancelled(check);
     if (result !== undefined) return result;
-    await Zotero.Promise.delay(3000);
+    await waitForPDFExport(3000, task);
   }
   throw new Error("PDF 解析任务超时；请在服务商后台查看任务状态，避免重复计费。");
 }
@@ -168,9 +169,11 @@ export async function checkMinerUConnection(): Promise<void> {
   await requestMinerUUpload(mineruToken(getCloudKey("mineru")), getCloudModel("mineru"), "connection-test.pdf", 15000);
 }
 
-async function fetchMinerUStorage(url: string, body?: ArrayBuffer): Promise<ArrayBuffer | undefined> {
+async function fetchMinerUStorage(url: string, body?: ArrayBuffer, task?: PDFExportTask): Promise<ArrayBuffer | undefined> {
   const win = Zotero.getMainWindow();
+  task?.throwIfCancelled();
   const abort = new win.AbortController();
+  const unsubscribe = task?.onCancel(() => abort.abort());
   const timer = setTimeout(() => abort.abort(), 180000);
   const stage = body ? "上传原始 PDF" : "下载解析结果";
   try {
@@ -183,31 +186,34 @@ async function fetchMinerUStorage(url: string, body?: ArrayBuffer): Promise<Arra
     if (!response.ok) throw new Error("MinerU " + stage + "失败（HTTP " + response.status + "）。");
     if (!body) return await response.arrayBuffer();
   } catch (error) {
+    if (task?.cancelled) throw new PDFExportCancelledError();
     const message = (error as Error).message;
     if (/^MinerU .*HTTP /u.test(message)) throw error;
     throw new Error("MinerU " + stage + "失败（网络或响应异常）。");
   } finally {
+    unsubscribe?.();
     clearTimeout(timer);
   }
 }
 
 async function mineru(bytes: Uint8Array, key: string, model: string, base: NativeDocument,
-  check?: () => boolean): Promise<NativeDocument> {
+  check?: () => boolean, task?: PDFExportTask): Promise<NativeDocument> {
   const token = mineruToken(key);
   const { batchID, uploadURL } = await requestMinerUUpload(token, model, "document.pdf");
   cancelled(check);
-  await fetchMinerUStorage(uploadURL, binary(bytes));
+  await fetchMinerUStorage(uploadURL, binary(bytes), task);
   const resultURL = await poll<string>(async () => {
     const current = mineruData(await json("GET", MINERU_API + "/extract-results/batch/" +
       encodeURIComponent(batchID), token));
     const row = current.extract_result?.[0];
     if (row?.state === "failed") throw new Error("MinerU 解析任务失败。");
     return row?.state === "done" ? signedURL(row.full_zip_url) : undefined;
-  }, check);
-  const zip = await fetchMinerUStorage(resultURL);
+  }, check, task);
+  cancelled(check);
+  const zip = await fetchMinerUStorage(resultURL, undefined, task);
   if (!zip) throw new Error("MinerU 未返回解析文件。");
   cancelled(check);
-  return normalizeMinerU(base, await readMinerUZip(zip));
+  return normalizeMinerU(base, await readMinerUZip(zip, task));
 }
 async function mistral(bytes: Uint8Array, key: string, model: string,
   base: NativeDocument): Promise<NativeDocument> {
@@ -227,7 +233,7 @@ function multipart(bytes: Uint8Array): { body: ArrayBuffer; type: string } {
   return { body: all.buffer, type: "multipart/form-data; boundary=" + boundary };
 }
 async function llamaparse(bytes: Uint8Array, key: string, model: string, base: NativeDocument,
-  check?: () => boolean): Promise<NativeDocument> {
+  check?: () => boolean, task?: PDFExportTask): Promise<NativeDocument> {
   if (!["fast", "cost_effective", "agentic", "agentic_plus"].includes(model)) {
     throw new Error("LlamaParse tier 无效。");
   }
@@ -244,19 +250,19 @@ async function llamaparse(bytes: Uint8Array, key: string, model: string, base: N
     const data = await json("GET", root + "/api/v2/parse/" + encodeURIComponent(job.id) + "?expand=markdown", key);
     if (["FAILED", "CANCELLED"].includes(data?.job?.status)) throw new Error("LlamaParse 解析任务失败或取消。");
     return data?.job?.status === "COMPLETED" ? data : undefined;
-  }, check);
+  }, check, task);
   return normalizeMarkdownPages(base, "llamaparse", result?.markdown?.pages);
 }
 export async function parseWithCloudProvider(provider: CloudParser, bytes: Uint8Array,
-  base: NativeDocument, check?: () => boolean): Promise<NativeDocument> {
+  base: NativeDocument, check?: () => boolean, task?: PDFExportTask): Promise<NativeDocument> {
   const key = getCloudKey(provider);
   if (!key) throw new Error(CLOUD_NAMES[provider] + " 尚未配置 API Key。");
   if (bytes.length < 4 || bytes.length > MAX_BYTES) throw new Error("云端解析预览版仅支持不超过 30 MB 的 PDF。");
   cancelled(check);
   const model = getCloudModel(provider);
   switch (provider) {
-    case "mineru": return mineru(bytes, key, model, base, check);
+    case "mineru": return mineru(bytes, key, model, base, check, task);
     case "mistral": return mistral(bytes, key, model, base);
-    case "llamaparse": return llamaparse(bytes, key, model, base, check);
+    case "llamaparse": return llamaparse(bytes, key, model, base, check, task);
   }
 }

@@ -6,8 +6,10 @@
  */
 import type { PDFDocument, PDFPage } from "pdf-lib";
 import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
+import type { PDFExportTask } from "./pdfExportTask";
 
-export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024): Promise<Uint8Array> {
+export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024, task?: PDFExportTask): Promise<Uint8Array> {
+  task?.throwIfCancelled();
   const size = file.exists() ? Number(file.fileSize) : 0;
   if (!Number.isSafeInteger(size) || size < 4 || size > maxBytes) {
     throw new Error("PDF 文件不存在、为空或超过允许的大小。");
@@ -15,7 +17,7 @@ export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024): Prom
   const io = (globalThis as any).IOUtils;
   if (typeof io?.read === "function") {
     const bytes = await withPDFOperationDeadline<Uint8Array>("PDF 文件读取", PDF_DEADLINES.fileRead,
-      () => io.read(file.path, { maxBytes: size + 1 }));
+      () => io.read(file.path, { maxBytes: size + 1 }), undefined, task);
     if (bytes.length !== size) throw new Error("读取期间 PDF 文件大小发生变化。");
     return bytes;
   }
@@ -36,21 +38,23 @@ export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024): Prom
       bytes.set(chunk, offset);
       offset += chunk.length;
       if (offset % 1048576 === 0) await Zotero.Promise.delay(0);
+      task?.throwIfCancelled();
       if (Date.now() >= deadline) throw new PDFOperationTimeoutError("PDF 文件读取", PDF_DEADLINES.fileRead);
     }
     return bytes;
   } finally { stream.close(); }
 }
 
-export async function readOriginalAttachment(attachment: any): Promise<Uint8Array> {
+export async function readOriginalAttachment(attachment: any, task?: PDFExportTask): Promise<Uint8Array> {
   const path = await withPDFOperationDeadline<any>("原始 PDF 附件路径读取", PDF_DEADLINES.fileRead,
-    () => attachment.getFilePathAsync());
+    () => attachment.getFilePathAsync(), undefined, task);
   if (!path) throw new Error("原始 PDF 尚未下载到本机。请先下载附件。");
   const file = (Zotero.File as any).pathToFile(path);
-  return readPDFFile(file);
+  return readPDFFile(file, undefined, task);
 }
 
-export async function writePDFFile(file: any, bytes: Uint8Array): Promise<void> {
+export async function writePDFFile(file: any, bytes: Uint8Array, task?: PDFExportTask): Promise<void> {
+  task?.throwIfCancelled();
   const c = (globalThis as any).Components;
   const stream = c.classes["@mozilla.org/io/arraybuffer-input-stream;1"]
     .createInstance(c.interfaces.nsIArrayBufferInputStream);
@@ -58,7 +62,7 @@ export async function writePDFFile(file: any, bytes: Uint8Array): Promise<void> 
   stream.setData(buffer, 0, buffer.byteLength);
   await writeTemporaryWithDeadline("PDF 临时文件写入", PDF_DEADLINES.fileWrite,
     () => (Zotero.File as any).putContentsAsync(file.path, stream),
-    () => { if (file.exists()) file.remove(false); });
+    () => { if (file.exists()) file.remove(false); }, task);
 }
 
 /** Place a source page inside a panel without cropping or rasterizing it.
@@ -91,8 +95,9 @@ async function embedPanel(out: PDFDocument, source: PDFPage,
 /** Pair each source once and keep overflow in the right panel of later sheets. */
 export async function composeSideBySidePDF(
   original: Uint8Array, transcripts: AsyncIterable<{ pageIndex: number; bytes?: Uint8Array; continuation?: Uint8Array }>,
-  expectedPages?: number,
+  expectedPages?: number, task?: PDFExportTask,
 ): Promise<Uint8Array> {
+  task?.throwIfCancelled();
   const { PDFDocument, rgb } = await import("pdf-lib");
   const source = await PDFDocument.load(original, { updateMetadata: false });
   const count = source.getPageCount();
@@ -103,6 +108,7 @@ export async function composeSideBySidePDF(
   const panelW = 595.28, panelH = 841.89, gutter = 16;
   let index = 0, sheets = 0;
   for await (const entry of transcripts) {
+    task?.throwIfCancelled();
     if (entry.pageIndex !== index || index >= count) throw new Error("左右对照：译文页顺序错误或缺页。");
     const translated = entry.bytes && await PDFDocument.load(entry.bytes, { updateMetadata: false });
     if (translated && !translated.getPageCount()) throw new Error("左右对照：译文页面为空。");
@@ -112,6 +118,7 @@ export async function composeSideBySidePDF(
     const rightPages = [...(translated?.getPages() || []), ...(continuation?.getPages() || [])];
     if (!rightPages.length) rightPages.push(originalPage);
     for (const [part, rightPage] of rightPages.entries()) {
+      task?.throwIfCancelled();
       const sheet = out.addPage([panelW * 2 + gutter, panelH]);
       sheet.drawLine({ start: { x: panelW + gutter / 2, y: 12 },
         end: { x: panelW + gutter / 2, y: panelH - 12 },
@@ -124,7 +131,9 @@ export async function composeSideBySidePDF(
     index++;
   }
   if (index !== count || !sheets) throw new Error("左右对照：原始页面未全部配对。");
+  task?.throwIfCancelled();
   const bytes = await out.save();
+  task?.throwIfCancelled();
   if ((await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount() !== sheets) {
     throw new Error("左右对照：最终 PDF 页数校验失败。");
   }

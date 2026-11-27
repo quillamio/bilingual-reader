@@ -17,7 +17,7 @@ export class CancellationToken {
     const listeners = Array.from(this.listeners);
     this.listeners.clear();
     for (const listener of listeners) {
-      listener();
+      try { listener(); } catch (_) { /* One broken listener must not prevent cancellation. */ }
     }
   }
 

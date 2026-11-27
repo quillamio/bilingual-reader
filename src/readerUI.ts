@@ -3,11 +3,13 @@ import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAsset
 import { getPDFExportLayout, getTranslateAllPages } from "./settings";
 import { getNativePDFBackend } from "./pdfNativeDocling";
 import type { PositionedPDFPage } from "./pdfInPlaceLayout";
-import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
+import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline, waitForPDFExport } from "./pdfOperationDeadline";
+import { PDFExportTask, PDFExportCancelledError } from "./pdfExportTask";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
 const PRINTER_EMOJI = "🖨️";
+const exportTasks = new WeakMap<object, PDFExportTask>();
 
 function getInternalReader(reader: any): any {
   return reader?._internalReader || reader;
@@ -308,13 +310,14 @@ async function readPDFMarkers(file: any): Promise<{ header: string; tail: string
   }
 }
 
-async function waitForGeneratedFile(file: any): Promise<void> {
+async function waitForGeneratedFile(file: any, task?: PDFExportTask): Promise<void> {
   let previousSize = 0;
   let stableObservations = 0;
   let sawOutput = false;
 
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
+    task?.throwIfCancelled();
     try {
       if (file.exists() && file.fileSize >= 32) {
         sawOutput = true;
@@ -325,15 +328,15 @@ async function waitForGeneratedFile(file: any): Promise<void> {
         // Size alone does not prove the PDF has finished being written.
         if (stableObservations >= 2) {
           const { header, tail } = await withPDFOperationDeadline("打印文件完整性检查",
-            Math.min(PDF_DEADLINES.fileMarkers, Math.max(1, deadline - Date.now())), () => readPDFMarkers(file));
+            Math.min(PDF_DEADLINES.fileMarkers, Math.max(1, deadline - Date.now())), () => readPDFMarkers(file), undefined, task);
           if (hasCompletePDFMarkers(header, tail)) return;
         }
       }
     } catch (error) {
-      if (error instanceof PDFOperationTimeoutError) throw error;
+      if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
       // Printing may still be creating or flushing the file.
     }
-    await Zotero.Promise.delay(100);
+    await waitForPDFExport(100, task);
   }
   throw new Error(
     sawOutput
@@ -342,7 +345,7 @@ async function waitForGeneratedFile(file: any): Promise<void> {
   );
 }
 
-export async function importExportedPDF(tempFile: any, sourceAttachment: any, suffix = "中英对照翻译"): Promise<any> {
+export async function importExportedPDF(tempFile: any, sourceAttachment: any, suffix = "中英对照翻译", task?: PDFExportTask): Promise<any> {
   const parentItemID = Number(sourceAttachment?.parentItemID || 0);
   if (!parentItemID) {
     throw new Error("当前 PDF 没有父级文献条目，无法作为条目附件保存。请先为该 PDF 创建父级条目。");
@@ -350,6 +353,7 @@ export async function importExportedPDF(tempFile: any, sourceAttachment: any, su
 
   const parentItem = Zotero.Items.get(parentItemID);
   const parentTitle = String(parentItem?.getField?.("title") || "中英对照翻译").trim();
+  task?.beginImport();
   const attachment = await (Zotero.Attachments as any).importFromFile({
     file: tempFile,
     parentItemID,
@@ -374,8 +378,9 @@ function getHiddenBrowserConstructor(): any {
 }
 
 export async function printHTMLToPDF(
-  html: string, tempFile: any, size?: { width: number; height: number },
+  html: string, tempFile: any, size?: { width: number; height: number }, task?: PDFExportTask,
 ): Promise<void> {
+  task?.throwIfCancelled();
   const mainWindow = Zotero.getMainWindow() as any;
   const printUtils = mainWindow?.PrintUtils;
   if (!printUtils?.getPrintSettings) {
@@ -392,15 +397,15 @@ export async function printHTMLToPDF(
     // contents in the browser's load diagnostic.
     await writeTemporaryWithDeadline("打印 HTML 临时文件写入", PDF_DEADLINES.fileWrite,
       () => (Zotero.File as any).putContentsAsync(htmlFile.path, html),
-      () => { if (htmlFile.exists()) htmlFile.remove(false); });
+      () => { if (htmlFile.exists()) htmlFile.remove(false); }, task);
     const loaded = await withPDFOperationDeadline("隐藏浏览器加载", PDF_DEADLINES.browserLoad,
-      () => browser.load(htmlFile.path));
+      () => browser.load(htmlFile.path), undefined, task);
     if (!loaded) throw new Error("用于导出的中英对照页面加载失败。");
 
     // 'interactive' is too early: lazy images may still be loading.
     // Never silently print if the ready-state actor failed.
     await withPDFOperationDeadline("打印页面资源加载", PDF_DEADLINES.browserReady,
-      () => browser.waitForDocument({ allowInteractiveAfter: false }));
+      () => browser.waitForDocument({ allowInteractiveAfter: false }), undefined, task);
 
     const browsingContext = browser.browsingContext;
     if (!browsingContext?.print) {
@@ -430,8 +435,9 @@ export async function printHTMLToPDF(
 
     // A hung Gecko print must reach finally so the hidden browser is destroyed.
     // Allow longer for a whole-document reflow than for a positioned page.
-    await withPDFPrintDeadline(() => browsingContext.print(settings), size ? 120000 : 300000);
-    await waitForGeneratedFile(tempFile);
+    await withPDFPrintDeadline(() => browsingContext.print(settings), size ? 120000 : 300000, task,
+      () => { if (tempFile.exists()) tempFile.remove(false); });
+    await waitForGeneratedFile(tempFile, task);
   } finally {
     try {
       browser.destroy();
@@ -496,8 +502,10 @@ function getReadingTranslationPages(reader: any, doc: Document): PositionedPDFPa
   return pages;
 }
 
-export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null): Promise<void> {
+export async function exportBilingualPDF(reader: any, button: HTMLButtonElement | null = null, task?: PDFExportTask): Promise<void> {
+  task?.throwIfCancelled();
   const { hasMinerUReadingFallback, getMinerUReadingResult } = await import("./pdfNativeReadingPanel");
+  task?.throwIfCancelled();
   const fallback = getMinerUReadingResult(reader);
   const layout = getPDFExportLayout();
   if (hasMinerUReadingFallback(reader) && !fallback) {
@@ -509,7 +517,7 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
     ? getReadingTranslationPages(reader, doc) : null;
   if (fallback || (layout === "side-by-side" && !pages)) {
     const { exportNativePDFBilingual } = await import("./pdfNativeExport");
-    await exportNativePDFBilingual(reader, button, fallback, layout);
+    await exportNativePDFBilingual(reader, button, fallback, layout, task);
     return;
   }
 
@@ -559,12 +567,13 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
   if (pages) {
     try {
       const { supplementReadingPDFPages, saveSideBySidePDF } = await import("./pdfNativeExport");
-      const result = await supplementReadingPDFPages(reader, sourceAttachment, pages, button);
+      const result = await supplementReadingPDFPages(reader, sourceAttachment, pages, button, task);
       if (result.missing && !confirmMessage(reader, result.missing + "\n\n仍要导出当前结果？")) return;
-      const note = await saveSideBySidePDF(reader, sourceAttachment, result.pages, button);
+      const note = await saveSideBySidePDF(reader, sourceAttachment, result.pages, button, task);
       showMessage(reader, "左右对照导出成功。左侧为原始 PDF，右侧为原位译文。" +
         (result.missing ? "\n" + result.missing : "") + note);
     } catch (error) {
+      if (error instanceof PDFExportCancelledError || task?.cancelled) return;
       Zotero.logError(error as Error);
       showMessage(reader, `左右对照导出失败：${(error as Error)?.message || String(error)}`);
     }
@@ -583,16 +592,18 @@ export async function exportBilingualPDF(reader: any, button: HTMLButtonElement 
 
   try {
     const liveRoot = doc.querySelector("#sdt-content") as HTMLElement;
-    await preparePDFExportFigures(getActiveSDTView(reader), liveRoot, reader);
+    await preparePDFExportFigures(getActiveSDTView(reader), liveRoot, reader, task);
     const exportClone = liveRoot.cloneNode(true) as HTMLElement;
-    const assets = await freezePDFExportImages(liveRoot, exportClone);
+    const assets = await freezePDFExportImages(liveRoot, exportClone, task);
+    task?.throwIfCancelled();
     if ((assets.failed || assets.absentFigureCaptions) && !confirmMessage(reader,
       `有 ${assets.failed} 个图像资源无法嵌入，${assets.absentFigureCaptions} 个图注未找到对应图片。是否继续导出已读取的内容？`)) return;
 
     const html = buildExportHTML(doc, `${parentTitle} - 中英对照翻译`, exportClone);
-    await printHTMLToPDF(html, tempFile);
-    await importExportedPDF(tempFile, sourceAttachment);
+    await printHTMLToPDF(html, tempFile, undefined, task);
+    await importExportedPDF(tempFile, sourceAttachment, undefined, task);
   } catch (error: any) {
+    if (error instanceof PDFExportCancelledError || task?.cancelled) return;
     Zotero.logError(error as Error);
     showMessage(reader, `导出中英对照 PDF 失败：${error?.message || String(error)}`);
     return;
@@ -619,13 +630,39 @@ export function renderReaderExportButton(event: any): void {
         PRINTER_EMOJI,
         "将当前中英对照结果导出为 PDF 并添加到文献附件",
         (button) => {
-          if (button.disabled) return;
+          const existing = exportTasks.get(reader);
+          if (existing) {
+            if (existing.canCancel) {
+              existing.cancel();
+              button.disabled = true;
+              button.title = "正在停止导出并清理临时文件…";
+              button.setAttribute("aria-label", button.title);
+            }
+            return;
+          }
           const oldTitle = button.title;
-          button.disabled = true;
-          void exportBilingualPDF(reader, button).finally(() => {
-            button.title = oldTitle;
-            button.setAttribute("aria-label", oldTitle);
-            button.disabled = false;
+          const task = new PDFExportTask(() => {
+            button.disabled = true;
+            button.title = "正在保存 Zotero 附件，此阶段不可取消…";
+            button.setAttribute("aria-label", button.title);
+          });
+          exportTasks.set(reader, task);
+          button.textContent = "⏹️";
+          button.title = "正在导出，点击停止";
+          button.setAttribute("aria-label", button.title);
+          void exportBilingualPDF(reader, button, task).catch(error => {
+            if (!task.cancelled && !(error instanceof PDFExportCancelledError)) {
+              Zotero.logError(error as Error);
+              showMessage(reader, String((error as Error).message || error));
+            }
+          }).finally(() => {
+            exportTasks.delete(reader);
+            try {
+              button.textContent = PRINTER_EMOJI;
+              button.title = oldTitle;
+              button.setAttribute("aria-label", oldTitle);
+              button.disabled = false;
+            } catch (_) { /* Reader may have closed during export. */ }
           });
         },
       ),
@@ -634,6 +671,7 @@ export function renderReaderExportButton(event: any): void {
 }
 
 export function cleanupReaderUI(reader: any): void {
+  if (reader && typeof reader === "object") exportTasks.get(reader)?.cancel();
   let doc: Document | null = null;
   try {
     doc = reader?._iframeWindow?.document || null;
