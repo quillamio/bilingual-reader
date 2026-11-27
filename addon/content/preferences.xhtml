@@ -21,6 +21,14 @@
   </hbox>
 </groupbox>
 
+<groupbox class="bilingualreader-preferences-section" id="bilingualreader-fallback-section">
+  <label><html:h3>免费翻译自动容灾</html:h3></label>
+  <html:label><html:input id="bilingualreader-fallback-enabled" type="checkbox"/> 首选免费引擎或 Translate for Zotero 失败时，允许将待翻译文字发送至下列备用服务</html:label>
+  <html:label for="bilingualreader-fallback-order">备用引擎顺序（逗号分隔，首选引擎始终优先）</html:label>
+  <html:input id="bilingualreader-fallback-order" type="text" style="width: 560px; max-width: 100%" />
+  <html:p style="max-width: 760px">可用 ID：bing, google, googleapi, tencenttransmart, youdao, huoshanweb, mymemory, cnki, iciba。未填写的服务不会被自动选用。Google 两入口共享限流状态；API 付费及本地引擎不会自动切换。默认关闭备用服务，开启即同意文字发送给所列服务。免费网页接口可能限额、停止服务或处理用户文本，不适合未发表或敏感资料。</html:p>
+</groupbox>
+
 <groupbox class="bilingualreader-preferences-section" id="bilingualreader-service-config-section">
   <label><html:h3>引擎配置</html:h3></label>
   <html:p id="bilingualreader-service-config-hint">

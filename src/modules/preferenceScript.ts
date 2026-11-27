@@ -7,6 +7,10 @@ import {
   setTranslateAllPages,
   DEFAULT_OLLAMA_URL,
   getEngine,
+  getFreeFallbackEnabled,
+  setFreeFallbackEnabled,
+  getFreeFallbackOrder,
+  setFreeFallbackOrder,
   getPDFExportLayout,
   setPDFExportLayout,
   getMaxCharsPerRequest,
@@ -392,6 +396,11 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
     updateBackendVisibility(doc);
     setFeedback(doc, "engine");
   });
+
+  const fallbackEnabled = getElement<HTMLInputElement>(doc, "bilingualreader-fallback-enabled");
+  if (fallbackEnabled) fallbackEnabled.checked = getFreeFallbackEnabled();
+  onPreferenceEdit(fallbackEnabled, control => setFreeFallbackEnabled(control.checked));
+  bindTextPreference(doc, "bilingualreader-fallback-order", getFreeFallbackOrder(), setFreeFallbackOrder);
 
   const native = getElement<HTMLSelectElement>(doc, "bilingualreader-native-backend");
   const refreshParserFields = () => {

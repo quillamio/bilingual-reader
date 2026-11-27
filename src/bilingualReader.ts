@@ -11,6 +11,10 @@ import {
   getOllamaURL,
   getRequestGapMs,
   getRequestTimeoutMs,
+  getRouteEngines,
+  getRouteProviderGroup,
+  getMixedRouteCacheTag,
+  getRoutedCacheTags,
   getTranslationPageCount,
   getTranslateAllPages,
   setEngine,
@@ -31,6 +35,7 @@ import {
   type BatchInput,
 } from "./translationPipeline";
 import { CancellationToken } from "./cancellationToken";
+import { TranslationRouter, TranslationCancelledError, translationHTTPError, type RouterCancellation } from "./translationRouter";
 import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
 import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
 import { translateNativeParagraph } from "./nativeTranslation";
@@ -93,63 +98,7 @@ class RunCancelledError extends Error {
 }
 
 function isCancellationError(error: unknown): boolean {
-  return error instanceof RunCancelledError || /翻译任务已取消/u.test(String(error));
-}
-
-async function raceWithTimeoutAndCancellation<T>(
-  request: Promise<T>,
-  timeoutMs: number,
-  cancellation: CancellationToken,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    let removeCancelListener: () => void = () => undefined;
-    const cleanup = () => {
-      clearTimeout(timeoutID);
-      removeCancelListener();
-    };
-    const finish = (handler: (value: any) => void, value: any) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      handler(value);
-    };
-    const onCancel = () => finish(reject, new RunCancelledError());
-
-    const timeoutID = setTimeout(() => {
-      finish(reject, new Error(`翻译请求超过 ${Math.round(timeoutMs / 1000)} 秒，已跳过。`));
-    }, timeoutMs);
-    removeCancelListener = cancellation.onCancel(onCancel);
-
-    request.then(
-      (value) => finish(resolve, value),
-      (error) => finish(reject, error),
-    );
-  });
-}
-
-async function cancellableDelay(
-  milliseconds: number,
-  cancellation: CancellationToken,
-): Promise<void> {
-  if (milliseconds <= 0) return;
-  if (cancellation.cancelled) throw new RunCancelledError();
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let removeCancelListener: () => void = () => undefined;
-    const finish = (handler: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutID);
-      removeCancelListener();
-      handler();
-    };
-    const onCancel = () => finish(() => reject(new RunCancelledError()));
-
-    const timeoutID = setTimeout(() => finish(resolve), milliseconds);
-    removeCancelListener = cancellation.onCancel(onCancel);
-  });
+  return error instanceof RunCancelledError || error instanceof TranslationCancelledError || /翻译任务已取消/u.test(String(error));
 }
 
 async function translateWithPDFTranslate(
@@ -252,9 +201,41 @@ export async function translateText(
   return translateWithPDFTranslate(text, itemID);
 }
 
+const translationRouter = new TranslationRouter();
+
+export async function translateTextRouted(
+  text: string, itemID: number, primary: TranslationEngine, cancellation?: RouterCancellation,
+  validate?: (result: string) => boolean,
+): Promise<TranslationResponse> {
+  return translationRouter.translate({
+    engines: getRouteEngines(primary).map(id => ({
+      id, group: getRouteProviderGroup(id),
+      gapMs: Math.max(getRequestGapMs(), getServiceDefinition(id)?.group === "free" || id === "pdftranslate" ? 1000 : 0),
+    })),
+    timeoutMs: getRequestTimeoutMs(), cancellation,
+    request: async id => {
+      try { return await translateText(text, itemID, id); }
+      catch (error) { throw translationHTTPError(error) || error; }
+    },
+    validate: response => !isFailureText(response.text) && !/^HTTP\s+[45]\d\d/u.test(response.text.trim()) &&
+      (validate ? validate(response.text) : true),
+  });
+}
+
+export function loadRoutedCachedTranslation(
+  itemKey: string, text: string, engine: TranslationEngine, invalid: (value: string) => boolean,
+): string | undefined {
+  for (const tag of getRoutedCacheTags(engine)) {
+    const result = loadCachedTranslation(itemKey, text, tag, invalid);
+    if (result) return result;
+  }
+  return undefined;
+}
+
 async function translateTextLimited(
   text: string,
   request: (chunk: string) => Promise<TranslationResponse>,
+  engine: TranslationEngine,
 ): Promise<TranslationResponse> {
   const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
   if (chunks.length === 1) {
@@ -262,13 +243,13 @@ async function translateTextLimited(
   }
 
   const translated: string[] = [];
-  let engineTag = "";
+  const tags = new Set<string>();
   for (const chunk of chunks) {
     const response = await request(chunk);
     translated.push(response.text);
-    engineTag = response.engineTag;
+    tags.add(response.engineTag);
   }
-  return { text: translated.join(" ").trim(), engineTag };
+  return { text: translated.join(" ").trim(), engineTag: tags.size === 1 ? [...tags][0] : getMixedRouteCacheTag(engine) };
 }
 
 function getInternalReader(reader: any): any {
@@ -518,7 +499,7 @@ function collectParagraphs(
       sourceText,
       sourceElement: element,
       pageIndex,
-      translation: loadCachedTranslation(itemKey, sourceText, engineTag, isFailureText),
+      translation: loadCachedTranslation(itemKey, sourceText, engineTag, isFailureText) || loadRoutedCachedTranslation(itemKey, sourceText, getEngine(), isFailureText) || "",
     });
   }
 
@@ -630,10 +611,6 @@ async function translateParagraphs(
 ): Promise<void> {
   const maxErrors = getMaxConsecutiveErrors();
   const freeService = getServiceDefinition(engine)?.group === "free";
-  const requestGapMs = freeService
-    ? Math.max(engine === "bing" ? 300 : 750, getRequestGapMs())
-    : getRequestGapMs();
-  const requestTimeoutMs = getRequestTimeoutMs();
   const configuredConcurrent = getMaxConcurrent();
   const concurrency = engine === "ollama" || freeService ? 1 : configuredConcurrent;
   const pendingIndexes = paragraphs
@@ -667,33 +644,16 @@ async function translateParagraphs(
   let completed = 0;
   let failureStreak = 0;
   let aborted = false;
-  let nextStartAt = Date.now();
-
-  const waitForStartSlot = async () => {
-    if (cancellation.cancelled) throw new RunCancelledError();
-    if (requestGapMs <= 0) return;
-    const now = Date.now();
-    const scheduled = Math.max(now, nextStartAt);
-    nextStartAt = scheduled + requestGapMs;
-    const wait = scheduled - now;
-    await cancellableDelay(wait, cancellation);
-  };
-
   const request = async (text: string): Promise<TranslationResponse> => {
-    await waitForStartSlot();
     if (!isCurrentRun(reader, generation, doc)) throw new RunCancelledError();
-    return raceWithTimeoutAndCancellation(
-      translateText(text, itemID, engine),
-      requestTimeoutMs,
-      cancellation,
-    );
+    return translateTextRouted(text, itemID, engine, cancellation);
   };
 
   const translateJob = async (
     job: TranslationJobItem[],
   ): Promise<Array<{ paragraphIndex: number; response: TranslationResponse }>> => {
     if (job.length === 1) {
-      const response = await translateTextLimited(job[0].text, request);
+      const response = await translateTextLimited(job[0].text, request, engine);
       return [{ paragraphIndex: job[0].paragraphIndex, response }];
     }
 
@@ -712,7 +672,7 @@ async function translateParagraphs(
     for (const item of job) {
       fallback.push({
         paragraphIndex: item.paragraphIndex,
-        response: await translateTextLimited(item.text, request),
+        response: await translateTextLimited(item.text, request, engine),
       });
     }
     return fallback;
@@ -742,7 +702,7 @@ async function translateParagraphs(
             itemKey,
             paragraph.sourceText,
             response.text,
-            engine === "pdftranslate" ? response.engineTag || engineTag : engineTag,
+            response.engineTag || engineTag,
             isFailureText,
           );
 

@@ -8,6 +8,7 @@
  * paid APIs. They may rate-limit, change, or become unavailable.
  */
 import { getRequestTimeoutMs } from "./settings";
+import { translationHTTPError, TranslationHTTPError } from "./translationRouter";
 
 export type BuiltInTranslationEngine = "google" | "googleapi" | "bing";
 
@@ -100,13 +101,13 @@ async function translateWithGoogle(
       `${origin}/translate_a/single?${query.toString()}`,
       { responseType: "json", timeout: getRequestTimeoutMs() },
     );
-    if (xhr?.status !== 200) throw new Error(`HTTP ${xhr?.status || "unknown"}`);
+    if (xhr?.status !== 200) throw translationHTTPError(xhr) || new Error("Google 翻译请求失败。");
     return parseGoogleTranslation(xhr.response);
   } catch (error) {
-    if (/429|rate.limit|too many requests/iu.test(String(error))) {
-      throw new Error("Google 翻译当前受限（HTTP 429）。请稍后重试，或在设置中选用其他翻译引擎。");
-    }
-    throw error;
+    const http = translationHTTPError(error);
+    if (http) throw http;
+    if (/429|rate.limit|too many requests/iu.test(String(error))) throw new TranslationHTTPError(429);
+    throw new Error("Google 翻译请求失败（网络或响应异常）。");
   }
 }
 
@@ -123,7 +124,7 @@ async function translateWithBing(text: string): Promise<string> {
     responseType: "json",
     timeout: getRequestTimeoutMs(),
   });
-  if (xhr?.status !== 200) throw new Error(`Bing 翻译请求失败：HTTP ${xhr?.status || "unknown"}`);
+  if (xhr?.status !== 200) throw translationHTTPError(xhr) || new Error("Bing 翻译请求失败。");
   return parseBingTranslation(xhr.response);
 }
 

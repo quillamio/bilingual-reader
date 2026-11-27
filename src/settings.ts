@@ -1,4 +1,5 @@
-import { isManagedService, getServiceRevision } from "./serviceCatalog";
+import { isManagedService, getServiceRevision, getServiceDefinition } from "./serviceCatalog";
+import { DEFAULT_FALLBACK_ORDER, normalizeFallbackOrder, providerGroup } from "./translationRouter";
 
 const BASE = "extensions.zotero.bilingualreader";
 
@@ -232,4 +233,39 @@ export function migrateLegacyPreferences(): void {
       Zotero.logError(error as Error);
     }
   }
+}
+
+
+const FALLBACK_ENABLED_PREF = BASE + ".fallback.enabled";
+const FALLBACK_ORDER_PREF = BASE + ".fallback.order";
+
+export function getFreeFallbackEnabled(): boolean {
+  return (Zotero.Prefs as any).get(FALLBACK_ENABLED_PREF, true) === true;
+}
+export function setFreeFallbackEnabled(value: boolean): void {
+  (Zotero.Prefs as any).set(FALLBACK_ENABLED_PREF, value, true);
+}
+export function getFreeFallbackOrder(): string {
+  const raw = (Zotero.Prefs as any).get(FALLBACK_ORDER_PREF, true);
+  return normalizeFallbackOrder(typeof raw === "string" ? raw : DEFAULT_FALLBACK_ORDER).join(",");
+}
+export function setFreeFallbackOrder(value: string): void {
+  setStringPref(FALLBACK_ORDER_PREF, normalizeFallbackOrder(value).join(","));
+}
+export function getRouteEngines(primary: string): string[] {
+  if (!getFreeFallbackEnabled() || (primary !== "pdftranslate" && getServiceDefinition(primary)?.group !== "free")) return [primary];
+  return [...new Set([primary, ...normalizeFallbackOrder(getFreeFallbackOrder())])];
+}
+export function getRouteProviderGroup(engine: string): string {
+  if (engine !== "pdftranslate") return providerGroup(engine);
+  const actual = getResolvedPDFTranslateService();
+  return actual && getServiceDefinition(actual) ? providerGroup(actual) : "pdftranslate";
+}
+export function getMixedRouteCacheTag(primary: string): string {
+  return "mixed-route:" + JSON.stringify(getRouteEngines(primary).map(engine => getCacheEngineTag(undefined, engine)));
+}
+export function getRoutedCacheTags(primary: string): string[] {
+  const engines = getRouteEngines(primary);
+  const tags = engines.map(engine => getCacheEngineTag(undefined, engine));
+  return engines.length > 1 ? [...tags, getMixedRouteCacheTag(primary)] : tags;
 }

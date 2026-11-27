@@ -2,22 +2,23 @@
  * Export using native PDF parsing or an existing MinerU reading result.
  * Side-by-side embeds original PDF pages; stacked prints the parsed transcript.
  */
-import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getRequestGapMs,
-  getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, getRequestTimeoutMs, type PDFExportLayout } from "./settings";
-import { loadCachedTranslation, saveCachedTranslation } from "./translationCache";
+import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getMixedRouteCacheTag,
+  getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, type PDFExportLayout } from "./settings";
+import { saveCachedTranslation } from "./translationCache";
 import { buildBatchPayload, packBatchItems, parseBatchResult, splitTextForRequest,
   type BatchInput } from "./translationPipeline";
-import { translateText } from "./bilingualReader";
+import { translateTextRouted, loadRoutedCachedTranslation } from "./bilingualReader";
+import { TranslationCancelledError } from "./translationRouter";
 import { printHTMLToPDF, importExportedPDF } from "./readerUI";
 import { PDFPrintTimeoutError } from "./pdfExportUtils";
-import { PDFOperationTimeoutError, withPDFOperationDeadline, waitForPDFExport } from "./pdfOperationDeadline";
+import { PDFOperationTimeoutError, withPDFOperationDeadline } from "./pdfOperationDeadline";
 import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
 import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "./pdfNativeDocling";
 import { getNormalPDFProxy, getPDFPageLayout, parseNormalPDFWithPDFJS, renderPDFRegion } from "./pdfNativeRuntime";
 import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
 import { parseWithCloudProvider } from "./pdfCloudParsers";
 import { composeSideBySidePDF, readOriginalAttachment, readPDFFile, writePDFFile } from "./pdfVectorExport";
-import { isManagedService, getServiceDefinition, assertServiceConfigured } from "./serviceCatalog";
+import { isManagedService, assertServiceConfigured } from "./serviceCatalog";
 import { describePDFParser, PDF_PARSER_NAMES, withoutBibliography, type NativeDocument, type NativeBlock } from "./pdfNativeModel";
 import { buildNativeBilingualHTML, buildTranslatedPageHTML, type NativeExportPage } from "./pdfNativeHtml";
 import { buildInPlacePageHTML, type PositionedPDFPage } from "./pdfInPlaceLayout";
@@ -57,18 +58,19 @@ async function translateSegment(
   text: string, itemID: number, engine: ReturnType<typeof getEngine>, task?: PDFExportTask,
 ): Promise<{ text: string; tag: string }> {
   const chunks = splitTextForRequest(text, getMaxCharsPerRequest());
-  const gap = getServiceDefinition(engine)?.group === "free" ? Math.max(engine === "bing" ? 300 : 750, getRequestGapMs()) : getRequestGapMs();
   const translated: string[] = [];
-  let tag = getCacheEngineTag(undefined, engine);
+  const tags = new Set<string>();
   for (const chunk of chunks) {
-    const response = await withPDFOperationDeadline("翻译请求", getRequestTimeoutMs(),
-      () => translateText(chunk, itemID, engine), undefined, task);
-    if (isUntranslated(chunk, response.text)) throw new Error("翻译服务返回空白、错误或与原文相同的内容。");
-    translated.push(response.text);
-    tag = response.engineTag;
-    if (gap) await waitForPDFExport(gap, task);
+    try {
+      const response = await translateTextRouted(chunk, itemID, engine, task, result => !isUntranslated(chunk, result));
+      translated.push(response.text);
+      tags.add(response.engineTag);
+    } catch (error) {
+      if (error instanceof TranslationCancelledError || task?.cancelled) throw new PDFExportCancelledError();
+      throw error;
+    }
   }
-  return { text: translated.join(" ").trim(), tag };
+  return { text: translated.join(" ").trim(), tag: tags.size === 1 ? [...tags][0] : getMixedRouteCacheTag(engine) };
 }
 
 export async function translateNativeDocument(
@@ -92,7 +94,7 @@ export async function translateNativeDocument(
       if (!canTranslate(block)) continue;
       const text = block.source === "pdfjs" && block.lineTexts?.length
         ? joinPDFLines(block.lineTexts) : block.text;
-      const cached = loadCachedTranslation(itemKey, text, engineTag, result => isUntranslated(text, result));
+      const cached = loadRoutedCachedTranslation(itemKey, text, engine, result => isUntranslated(text, result));
       if (cached) translated.set(block.id, cached);
       else pending.push({ ...block, text });
     }
@@ -124,7 +126,7 @@ export async function translateNativeDocument(
           ? { text: fromBatch, tag: batchTag }
           : await translateSegment(block.text, itemID, engine, task);
         translated.set(block.id, result);
-        saveCachedTranslation(itemKey, block.text, result, engine === "pdftranslate" ? tag : engineTag, isFailure);
+        saveCachedTranslation(itemKey, block.text, result, tag || engineTag, isFailure);
         consecutiveFailures = 0;
       } catch (error) {
         if (error instanceof PDFOperationTimeoutError || error instanceof PDFExportCancelledError) throw error;
@@ -139,7 +141,6 @@ export async function translateNativeDocument(
     done += job.length;
     if (isCancelled?.() || task?.cancelled) throw new PDFExportCancelledError();
     onProgress?.(done, pending.length);
-    if (getRequestGapMs()) await waitForPDFExport(getRequestGapMs(), task);
   }
   task?.throwIfCancelled();
   return translated;

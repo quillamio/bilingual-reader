@@ -5,6 +5,7 @@
  */
 import { getServiceSetting, assertServiceConfigured, isManagedService } from "./serviceCatalog";
 import { getRequestTimeoutMs } from "./settings";
+import { translationHTTPError } from "./translationRouter";
 import { isBuiltInEngine, translateWithBuiltIn } from "./builtInTranslationServices";
 import { translateSignedService } from "./signedTranslationServices";
 import { translateEncryptedWebService } from "./encryptedWebTranslation";
@@ -44,7 +45,7 @@ async function fetchTranslation(
     };
     if (data !== undefined) options.body = typeof data === "string" ? data : JSON.stringify(data);
     const xhr = await Zotero.HTTP.request(method, url, options);
-    if (xhr?.status !== 200) throw new Error("HTTP " + String(xhr?.status || "?"));
+    if (xhr?.status !== 200) throw translationHTTPError(xhr) || new Error("翻译服务请求失败。");
     if (typeof xhr.response === "string" && responseType === "json") {
       try { return JSON.parse(xhr.response); } catch (_) {
         throw new Error("响应不是有效 JSON。");
@@ -53,8 +54,7 @@ async function fetchTranslation(
     return xhr.response;
   } catch (error: any) {
     // Never display URL bodies containing credential/query text or supplied PDF content.
-    const status = String(error?.status || error?.message || "").match(/\b(401|403|404|408|413|429|500|502|503|504)\b/);
-    throw new Error("翻译服务请求失败" + (status ? "（HTTP " + status[1] + "）" : "（网络或服务端错误）") + "。");
+    throw translationHTTPError(error) || new Error("翻译服务请求失败（网络或服务端错误）。");
   }
 }
 function post(url: string, body: unknown, headers: Headers = {}): Promise<any> {
