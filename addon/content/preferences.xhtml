@@ -73,6 +73,16 @@
     <html:label>访问令牌 <html:input id="bilingualreader-localpdf-token" type="password" autocomplete="off"/></html:label>
     <html:label>本机引擎 <html:select id="bilingualreader-localpdf-engine"><html:option value="pdf2zh-next">PDF2zh-next</html:option><html:option value="babeldoc">BabelDOC</html:option></html:select></html:label>
     <html:p>需手动启动项目 scripts/local_pdf_server.py 并安装对应引擎。仅接受本机服务，云端模型仍可能收费。</html:p>
+    <html:div style="margin:8px 0;padding:8px;border:1px solid #aaa">
+      <html:strong>BabelDOC 自动部署（实验性，暂未开放安装）</html:strong>
+      <html:p id="bilingualreader-runtime-status">检查已批准的运行包…</html:p>
+      <html:button id="bilingualreader-runtime-install" disabled="disabled" type="button">下载并安装</html:button>
+      <html:button id="bilingualreader-runtime-cancel" disabled="disabled" type="button">取消</html:button>
+      <html:select id="bilingualreader-runtime-versions" aria-label="已安装运行包版本"/>
+      <html:button id="bilingualreader-runtime-activate" disabled="disabled" type="button">复核并启用</html:button>
+      <html:button id="bilingualreader-runtime-remove" disabled="disabled" type="button">卸载所选版本</html:button>
+      <html:p>候选构建不是正式发布包。通过平台、许可及安全审核后才开放下载；安装不会启动翻译引擎。</html:p>
+    </html:div>
     <html:label>BelinDoc API Key <html:input id="bilingualreader-belin-key" type="password" autocomplete="off"/></html:label>
     <html:label>官方模型版本 <html:input id="bilingualreader-belin-model" type="text" placeholder="从官方 getModelList 获取"/></html:label>
     <html:label>BelinDoc 上传签名 Content-Disposition（高级） <html:input id="bilingualreader-belin-content-disposition" type="text" placeholder="attachment; filename=&quot;document.pdf&quot;"/></html:label>

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {runtimeTarget,runtimeID,runtimeURL,allowedRuntimeDownloadFinal,runtimePathKey,validateRuntimeMembers,RuntimeManager,approvedRuntime} from "../src/babeldocRuntimeManager.ts";
 const sha="a".repeat(64);
 const files=[{path:"python/bin/python3.12",size:1,sha256:sha,executable:true},{path:"launcher.py",size:1,sha256:sha,executable:false},{path:"requirements.lock",size:1,sha256:sha,executable:false}];
-const release={version:"0.7.1-r1",target:"macos-arm64",runtime:{size:123,sha256:sha},assets:{size:456,sha256:sha},unpackedSize:3,fileCount:3};
+const release={version:"0.7.1-r1",target:"macos-arm64",runtime:{size:123,sha256:sha},assets:{size:456,sha256:sha},unpackedSize:3,fileCount:3,manifestSha256:sha};
 const manifest={schema:1,version:"0.7.1",target:"macos-arm64",files};
 const entries=[...files,{path:"runtime-files.json",size:100}];
 test("only approved, fixed platform release URLs are generated; no candidate is approved",()=>{
@@ -40,4 +40,12 @@ test("no unapproved download; uninstall removes only selected known-shaped versi
 });
 test("cancelled install discards stage and cannot activate",async()=>{
  const x=fixture();let checks=0;await assert.rejects(new RuntimeManager(x.s,[release]).install(release.target,{...control,check(){if(++checks>=3)throw Error("cancelled");}}));assert.equal(x.calls.at(-1),"discard");assert.ok(!x.calls.includes("commit"));
+});
+
+test("switch version requires re-verification; removing inactive version preserves selection",async()=>{
+ const x=fixture();x.s.verifyInstalled=async(id)=>{x.calls.push("rehash:"+id);};
+ const m=new RuntimeManager(x.s,[release]);await m.activate(runtimeID(release),control);
+ assert.deepEqual(x.calls,["rehash:"+runtimeID(release),"select"]);
+ await m.uninstall("0.7.0-r1-macos-arm64");assert.equal(x.current(),runtimeID(release));
+ await assert.rejects(m.activate("0.7.2-r1-macos-arm64",control),/批准/);
 });

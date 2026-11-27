@@ -5,6 +5,7 @@ import { registerPrefsScripts } from "./modules/preferenceScript";
 import { migrateLegacyPreferences } from "./settings";
 import { flushTranslationCacheIndex } from "./translationCache";
 import { cleanupAllReadingLayouts } from "./readingLayout";
+import { stopRuntimeInstallation } from "./babeldocRuntimeZotero";
 
 async function registerPreferencesPane(): Promise<void> {
   await Zotero.PreferencePanes.register({
@@ -71,6 +72,7 @@ async function onMainWindowUnload(_win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  stopRuntimeInstallation();
   unregisterReaderToolbar();
   cleanupAllReadingLayouts();
   flushTranslationCacheIndex();

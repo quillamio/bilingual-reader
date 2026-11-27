@@ -193,3 +193,5 @@ BelinDoc 实测补充：S3 上传签名失败时保留 HTTP 403 与脱敏错误�
 
 ### BabelDOC 自动部署（长期开发）
 目标是首次授权下载校验后的本机专业排版运行包，之后无需手动安装 Python 或启动服务。已制定分平台安全构建、资产校验、安装生命周期、PDF 验收及回滚规范：[开发与验收任务书](docs/babeldoc-managed-runtime.md)。目前仍为手动本机桥接，尚未提供可自动安装的便携版。参考 zotero-fulltext-pdf-translate（AGPL-3.0）的引擎管理设计，本阶段未复制其代码。
+
+B2 experimental runtime manager: verified flat runtime ZIP, bounded download, archive and per-file SHA-256, version selection/reverification, explicit uninstall and cancellation. The settings panel is deliberately disabled for automatic downloads while no release is approved. B1 audit: [docs/babeldoc-b1-audit.md](docs/babeldoc-b1-audit.md). Runtime execution and actual PDF translation are B3/B4; no candidate executable is published or run by B2.

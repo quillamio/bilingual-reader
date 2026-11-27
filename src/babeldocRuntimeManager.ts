@@ -3,7 +3,7 @@ export type RuntimeTarget = "macos-arm64"|"macos-x64"|"windows-x64"|"linux-x64";
 export interface RuntimeAsset { sha256:string; size:number }
 export interface RuntimeRelease {
   version:string; target:RuntimeTarget; runtime:RuntimeAsset;
-  assets:RuntimeAsset; unpackedSize:number; fileCount:number;
+  assets:RuntimeAsset; unpackedSize:number; fileCount:number; manifestSha256:string;
 }
 // Candidate CI manifests are not approvals. Populate only after real platform,
 // dependency security, source/license and model redistribution reviews.
@@ -25,7 +25,7 @@ export function runtimeTarget(os:string,abi:string):RuntimeTarget|undefined {
 export function runtimeID(release:RuntimeRelease):string {
   if(!/^\d{1,3}\.\d{1,3}\.\d{1,3}-r[1-9]\d{0,3}$/u.test(release.version)||!["macos-arm64","macos-x64","windows-x64","linux-x64"].includes(release.target))throw new Error("运行包版本或平台无效。");
   if(![release.runtime,release.assets].every(a=>a&&digest(a.sha256)&&positive(a.size,MAX_RUNTIME_BYTES))||
-     !positive(release.unpackedSize,MAX_UNPACKED_BYTES)||!positive(release.fileCount,MAX_RUNTIME_FILES))throw new Error("运行包清单无效。");
+     !digest(release.manifestSha256)||!positive(release.unpackedSize,MAX_UNPACKED_BYTES)||!positive(release.fileCount,MAX_RUNTIME_FILES))throw new Error("运行包清单无效。");
   return release.version+"-"+release.target;
 }
 export function approvedRuntime(target:RuntimeTarget|undefined,registry:readonly RuntimeRelease[]=APPROVED_RUNTIME_RELEASES):RuntimeRelease|undefined {
@@ -55,17 +55,17 @@ export function validateRuntimeMembers(manifest:unknown,entries:readonly {path:s
   runtimeID(release);
   const data=manifest as any;
   if(data?.schema!==1||data.target!==release.target||data.version!==release.version.split("-r")[0]||!Array.isArray(data.files)||data.files.length!==release.fileCount||data.files.length>MAX_RUNTIME_FILES)throw new Error("运行包文件清单不匹配。");
-  const map=new Map<string,number>();
+  const map=new Map<string,{path:string;size:number}>();
   for(const entry of entries){
     const key=entry.path==="runtime-files.json"?entry.path:runtimePathKey(entry.path);
     if(map.has(key)||!Number.isSafeInteger(entry.size)||entry.size<0||entry.size>512*1024**2)throw new Error("运行包文件重复或容量异常。");
-    map.set(key,entry.size);
+    map.set(key,entry);
   }
   if(map.size!==data.files.length+1||!map.has("runtime-files.json"))throw new Error("运行包存在额外文件。");
   const seen=new Set<string>();let total=0;
   const members:RuntimeMember[]=data.files.map((r:any)=>{
     const key=runtimePathKey(r?.path);
-    if(seen.has(key)||!Number.isSafeInteger(r.size)||r.size<0||r.size>512*1024**2||map.get(key)!==r.size||!digest(r.sha256)||typeof r.executable!=="boolean")throw new Error("运行包文件校验清单无效。");
+    if(seen.has(key)||!Number.isSafeInteger(r.size)||r.size<0||r.size>512*1024**2||map.get(key)?.size!==r.size||map.get(key)?.path!==r.path||!digest(r.sha256)||typeof r.executable!=="boolean")throw new Error("运行包文件校验清单无效。");
     seen.add(key);total+=r.size;
     return {path:r.path,size:r.size,sha256:r.sha256,executable:r.executable};
   });
@@ -76,7 +76,7 @@ export function validateRuntimeMembers(manifest:unknown,entries:readonly {path:s
   if(!members.some(m=>m.path===executable&&m.executable)||!seen.has("launcher.py")||!seen.has("requirements.lock"))throw new Error("缺少运行包入口。");
   return members;
 }
-export interface RuntimeControl { check():void; progress(message:string):void }
+export interface RuntimeControl { check():void; progress(message:string):void; onCancel?(handler:()=>void):()=>void }
 export interface RuntimeStorage {
   current():Promise<string|undefined>;
   exists(id:string):Promise<boolean>;
@@ -87,6 +87,8 @@ export interface RuntimeStorage {
   select(id:string|undefined):Promise<void>;
   discard(stage:string):Promise<void>;
   remove(id:string):Promise<void>;
+  list?():Promise<string[]>;
+  verifyInstalled?(id:string,release:RuntimeRelease,control:RuntimeControl):Promise<void>;
 }
 export class RuntimeManager {
   private busy=false;
@@ -121,12 +123,22 @@ export class RuntimeManager {
       }
     });
   }
-  async uninstallCurrent():Promise<void>{
+  async activate(id:string,control:RuntimeControl):Promise<void>{
     await this.exclusive(async()=>{
-      const id=await this.storage.current();if(!id)return;
+      const release=this.releases.find(r=>runtimeID(r)===id);
+      if(!release||!this.storage.verifyInstalled)throw new Error("此版本未获批准，不能启用。");
+      control.check();await this.storage.verifyInstalled(id,release,control);control.check();await this.storage.select(id);
+    });
+  }
+  async uninstallCurrent():Promise<void>{
+    return this.uninstall();
+  }
+  async uninstall(selected?:string):Promise<void>{
+    await this.exclusive(async()=>{
+      const current=await this.storage.current();const id=selected??current;if(!id)return;
       if(!/^\d{1,3}\.\d{1,3}\.\d{1,3}-r[1-9]\d{0,3}-(?:macos-arm64|macos-x64|windows-x64|linux-x64)$/u.test(id))throw new Error("已安装版本标识无效。");
       // Clear selection only after removal succeeds; leave other versions intact.
-      await this.storage.remove(id);await this.storage.select(undefined);
+      await this.storage.remove(id);if(current===id)await this.storage.select(undefined);
     });
   }
 }

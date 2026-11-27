@@ -1,4 +1,5 @@
 import { getDiagnosticReport, clearDiagnostics } from "../taskDiagnostics";
+import { bindManagedRuntimePreferences } from "../babeldocRuntimeZotero";
 import {
   DEFAULT_OLLAMA_MODEL,
   DEFAULT_SKIP_LAST_PAGES,
@@ -469,6 +470,7 @@ export async function registerPrefsScripts(window: Window): Promise<void> {
   const localEngine=getElement<HTMLSelectElement>(doc,"bilingualreader-localpdf-engine");
   if(localEngine)localEngine.value=getLocalPDFEngine();
   onPreferenceEdit(localEngine,({value})=>setLocalPDFEngine(value));
+  bindManagedRuntimePreferences(doc);
   const diag=getElement<HTMLTextAreaElement>(doc,"bilingualreader-diagnostic-report");
   const refreshDiag=()=>{if(diag)diag.value=getDiagnosticReport();};
   getElement<HTMLButtonElement>(doc,"bilingualreader-diagnostic-refresh")?.addEventListener("click",refreshDiag);

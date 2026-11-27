@@ -148,8 +148,9 @@ def pack_installable(root,output,target):
             rows.append({"path":name,"size":size,"sha256":sha256(actual),"executable":executable})
             info=zipfile.ZipInfo(name);info.create_system=3;info.external_attr=((stat.S_IFREG|(0o700 if executable else 0o600))<<16);info.compress_type=zipfile.ZIP_DEFLATED
             with actual.open("rb") as src,z.open(info,"w",force_zip64=True) as dst:shutil.copyfileobj(src,dst,1024*1024)
-        z.writestr("runtime-files.json",json.dumps({"schema":1,"target":target,"version":"0.7.1","files":rows},separators=(",",":")))
-    return {"name":output.name,"sha256":sha256(output),"size":output.stat().st_size,"unpackedSize":total,"fileCount":len(rows)}
+        manifest=json.dumps({"schema":1,"target":target,"version":"0.7.1","files":rows},separators=(",",":")).encode("utf-8")
+        z.writestr("runtime-files.json",manifest)
+    return {"name":output.name,"sha256":sha256(output),"size":output.stat().st_size,"unpackedSize":total,"fileCount":len(rows),"manifestSha256":hashlib.sha256(manifest).hexdigest()}
 
 def unpack_installable(archive,dest,target):
     with zipfile.ZipFile(archive) as z:
