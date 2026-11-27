@@ -141,7 +141,8 @@ def pack_installable(root,output,target):
         for path in sorted(files):
             name=path.relative_to(root).as_posix();key=runtime_member(name)
             actual=path.resolve(strict=True)
-            if not actual.is_relative_to(root.resolve()) or not actual.is_file() or key in seen:raise ValueError("Unsafe or duplicate runtime file")
+            if not actual.is_relative_to(root.resolve()) or not actual.is_file():raise ValueError("Unsafe runtime file: "+name)
+            if key in seen:raise ValueError("Case-folded duplicate runtime file: "+name)
             seen.add(key);size=actual.stat().st_size;total+=size
             if len(seen)>100000 or size>512*1024**2 or total>4*1024**3:raise ValueError("Runtime size limit exceeded")
             executable=bool(actual.stat().st_mode & stat.S_IXUSR)
