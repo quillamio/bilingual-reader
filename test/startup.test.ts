@@ -40,16 +40,18 @@ describe("startup", function () {
     this.timeout(20000);
     const c=(globalThis as any).Components;
     const temp=Zotero.getTempDirectory();temp.append("br-runtime-fixture");
-    let phase="create fixture directory";
-    temp.createUnique(1,0o700);
+    let phase="create fixture directory",created=false;
     const child=(folder:any,name:string)=>{const file=folder.clone();file.append(name);return file;};
     try{
+      temp.createUnique(c.interfaces.nsIFile.DIRECTORY_TYPE,0o700);created=true;
       phase="write source";
       const source=child(temp,"source.txt");
       await (Zotero.File as any).putContentsAsync(source.path,"abc");
       const sha="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
       phase="SHA256 known vector";
       assert.equal(runtimeFileSHA256(source),sha);
+      const empty=child(temp,"empty");empty.create(c.interfaces.nsIFile.NORMAL_FILE_TYPE,0o600);
+      assert.equal(runtimeFileSHA256(empty),"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
       const files=[
         {path:"python/bin/python3.12",size:3,sha256:sha,executable:true},
         {path:"launcher.py",size:3,sha256:sha,executable:false},
@@ -85,8 +87,8 @@ describe("startup", function () {
       assert.equal(runtimeFileSHA256(exe),sha);
       assert.equal(runtimeFileSHA256(child(payload,"offline-assets.zip")),sha);
       assert.isTrue(child(payload,"installed.json").exists());
-    }catch(error:any){throw new Error("managed runtime fixture: "+phase+"; "+String(error?.message||error)+"; result="+String(error?.result));}
-    finally{if(temp.exists())temp.remove(true);}
+    }catch(error:any){assert.fail("managed runtime fixture: "+phase+"; "+String(error?.message||error)+"; result="+String(error?.result));}
+    finally{try{if(created&&temp.exists())temp.remove(true);}catch(_){/* preserve assertion */}}
   });
   it("should register the preferences pane", function () {
     const pane = Zotero.PreferencePanes.pluginPanes.find(

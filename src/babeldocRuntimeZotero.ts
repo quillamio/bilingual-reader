@@ -48,13 +48,17 @@ function regular(file:any):void{
 function stream(file:any):any{
   regular(file);const c=components();
   const input=c.classes["@mozilla.org/network/file-input-stream;1"].createInstance(c.interfaces.nsIFileInputStream);
-  input.init(file,0x01,0,0);return input;
+  input.init(file,0x01,0o444,0);return input;
 }
 export function runtimeFileSHA256(file:any):string{
+  regular(file);
+  // Match Zotero.Utilities.Internal.md5 native stream pattern. Gecko throws
+  // NS_ERROR_NOT_AVAILABLE for zero-length streams, which are valid wheel members.
+  if(Number(file.fileSize)===0)return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
   const c=components(),input=stream(file);
   try{
     const hash=c.classes["@mozilla.org/security/hash;1"].createInstance(c.interfaces.nsICryptoHash);
-    hash.initWithString("sha256");hash.updateFromStream(input,0xffffffff);
+    hash.init(hash.SHA256);hash.updateFromStream(input,0xffffffff);
     return Array.from(hash.finish(false) as string,ch=>ch.charCodeAt(0).toString(16).padStart(2,"0")).join("");
   }finally{input.close();}
 }
