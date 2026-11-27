@@ -187,3 +187,6 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 兼容打印路径也内嵌同源中文 TrueType 子集，使用本地 HTML data: 字体，不依赖操作系统安装中文字体，不联网。超出字体覆盖的符号仍由 Gecko 系统字体回退；继续检查真实中文可检索性及像素。
 
 BelinDoc 实测补充：S3 上传签名失败时保留 HTTP 403 与脱敏错误码；根据 X-Amz-SignedHeaders 补齐受支持请求头，Content-Disposition 候选值可在高级设置中调整。默认值尚待真实上传验证，不保证已解决服务方签名不一致。详见 [外部后端说明](docs/external-backends.md)。
+
+### PaddleOCR 官方版面解析（实验性）
+选择 PaddleOCR 解析引擎，仅需填写 AI Studio Access Token，默认 PaddleOCR-VL-1.6，也支持 PP-StructureV3 等。使用官方异步文档解析，读取结构化区域、顺序和坐标，原位替换须经过 PDF.js 实际文字线框核验；图表、公式与未知区域不直接擦除。解析额度取决于 AI Studio 账户政策，翻译引擎仍独立配置。本批次参考 [PaddleOCR 官方 API](https://www.paddleocr.ai/main/version3.x/inference_deployment/serving/paddleocr_official_api/typescript.html) 和 [官方异步协议](https://ai.baidu.com/ai-doc/AISTUDIO/fml7mozw5) 独立实现，不随插件分发 PaddleOCR SDK 或模型。[使用说明](docs/external-backends.md)。

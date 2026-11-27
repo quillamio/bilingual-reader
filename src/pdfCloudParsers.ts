@@ -10,6 +10,7 @@ import { CLOUD_NAMES, normalizeMinerU, normalizeMarkdownPages, type CloudParser 
 
 import { parseDoc2X, parseMathpix, type ParseRequest } from "./externalPDFClient";
 import { recordDiagnostic } from "./taskDiagnostics";
+import { parsePaddlePDF, PaddleHTTPError, PADDLE_RESULT_LIMIT, type PaddleRequest } from "./paddleOCRClient";
 
 const PREF = "extensions.zotero.bilingualreader.native.cloud.";
 const MAX_BYTES = 30 * 1024 * 1024;
@@ -21,7 +22,7 @@ export function setCloudKey(provider: CloudParser, key: string): void {
   (Zotero.Prefs as any).set(PREF + provider + ".key", key.trim(), true);
 }
 export function getCloudModel(provider: CloudParser): string {
-  const defaults = { mineru: "vlm", mistral: "mistral-ocr-latest", llamaparse: "agentic", doc2x: "v3-2026", mathpix: "" };
+  const defaults = { mineru: "vlm", mistral: "mistral-ocr-latest", llamaparse: "agentic", doc2x: "v3-2026", mathpix: "", paddleocr: "PaddleOCR-VL-1.6" };
   const value = (Zotero.Prefs as any).get(PREF + provider + ".model", true);
   return typeof value === "string" && value.trim() ? value.trim() : defaults[provider];
 }
@@ -267,6 +268,42 @@ export async function parseWithCloudProvider(provider: CloudParser, bytes: Uint8
     case "mineru": return mineru(bytes, key, model, base, check, task);
     case "mistral": return mistral(bytes, key, model, base);
     case "llamaparse": return llamaparse(bytes, key, model, base, check, task);
+    case "paddleocr": {
+      const verify=()=>{task?.throwIfCancelled();cancelled(check);};
+      const transport:PaddleRequest=async(method,url,headers,body)=>{
+        verify();
+        const win=Zotero.getMainWindow(),abort=new win.AbortController();
+        const off=task?.onCancel(()=>abort.abort()),timer=setTimeout(()=>abort.abort(),180000);
+        try {
+          const response=await win.fetch(url,{method,body,headers,credentials:"omit",redirect:"error",cache:"no-store",signal:abort.signal});
+          if(!response.ok)throw new PaddleHTTPError(response.status);
+          const length=Number(response.headers.get("Content-Length")||0);
+          if(length>PADDLE_RESULT_LIMIT)throw new Error("PaddleOCR 结果超过容量上限。");
+          if(!response.body)throw new Error("PaddleOCR 返回空响应。");
+          const reader=response.body.getReader(),decoder=new TextDecoder();
+          let size=0;const parts:string[]=[];
+          try {
+            while(true){
+              verify();const chunk=await reader.read();
+              if(chunk.done)break;
+              size+=chunk.value.byteLength;
+              if(size>PADDLE_RESULT_LIMIT)throw new Error("PaddleOCR 结果超过容量上限。");
+              parts.push(decoder.decode(chunk.value,{stream:true}));
+            }
+            parts.push(decoder.decode());verify();return parts.join("");
+          }finally{reader.releaseLock();}
+        }catch(error){
+          verify();
+          if(error instanceof PaddleHTTPError)throw error;
+          throw new Error("PaddleOCR 请求超时、网络异常或响应超过安全上限。");
+        }finally{off?.();clearTimeout(timer);abort.abort();}
+      };
+      recordDiagnostic(provider,"parse","start");
+      try{
+        const result=await parsePaddlePDF(transport,bytes,key,model,base,{check:verify,wait:ms=>waitForPDFExport(ms,task)});
+        recordDiagnostic(provider,"parse","success",undefined,result.pages.length);return result;
+      }catch(error){recordDiagnostic(provider,"parse",task?.cancelled?"cancelled":"failure",error instanceof PaddleHTTPError?error.status:undefined);throw error;}
+    }
     case "doc2x": case "mathpix": {
       const verify = () => { task?.throwIfCancelled(); cancelled(check); };
       const transport:ParseRequest = async (method,url,headers,body) => {

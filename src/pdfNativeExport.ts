@@ -370,7 +370,9 @@ export async function exportNativePDFBilingual(
 
     const parserStatus = describePDFParser(parsed, provider);
     progress(button, parserStatus + " · 正在准备译文…");
-    if (sideBySide && physical && parsed !== physical) {
+    // PaddleOCR already reconciles its regions with physical line geometry and
+    // protects table, formula and unknown regions. Do not undo those decisions.
+    if (sideBySide && physical && parsed !== physical && parsed.source !== "paddleocr") {
       const geometry = physical;
       parsed = {
         ...parsed,

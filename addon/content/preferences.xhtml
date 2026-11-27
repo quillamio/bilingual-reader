@@ -99,6 +99,7 @@
         <html:option value="llamaparse">LlamaParse（云端 API）</html:option>
         <html:option value="doc2x">Doc2X（云端 API）</html:option>
         <html:option value="mathpix">Mathpix（云端 API）</html:option>
+        <html:option value="paddleocr">PaddleOCR（AI Studio 官方解析 API）</html:option>
       </html:select>
     </hbox>
     <html:div id="bilingualreader-docling-section" hidden="hidden">
@@ -137,6 +138,12 @@
       <html:input id="bilingualreader-cloud-mistral-model" type="text" style="width: 250px; margin-inline: 8px"/>
     </html:div>
     <html:div id="bilingualreader-cloud-doc2x-section" hidden="hidden"><html:label>Doc2X API Key <html:input id="bilingualreader-cloud-doc2x-key" type="password" autocomplete="off"/></html:label><html:label>模型 v2 / v3-2026 <html:input id="bilingualreader-cloud-doc2x-model" type="text"/></html:label></html:div>
+    <html:div id="bilingualreader-cloud-paddleocr-section" hidden="hidden">
+      <html:label>PaddleOCR Access Token <html:input id="bilingualreader-cloud-paddleocr-key" type="password" autocomplete="off" style="width:340px"/></html:label>
+      <html:label>模型 <html:input id="bilingualreader-cloud-paddleocr-model" type="text" placeholder="PaddleOCR-VL-1.6" style="width:250px"/></html:label>
+      <html:p>默认 PaddleOCR-VL-1.6；可改为 PP-StructureV3、PaddleOCR-VL-1.5 或 PaddleOCR-VL。使用 AI Studio 免费解析额度（以账户当前政策为准），无需本地 Python。上传需确认；保留表格、公式和图形，坐标未通过核验的文本放入续页。仅解析，不包含翻译费用。</html:p>
+      <html:a id="bilingualreader-paddleocr-link" href="https://aistudio.baidu.com/">获取 AI Studio Access Token</html:a>
+    </html:div>
     <html:div id="bilingualreader-cloud-mathpix-section" hidden="hidden"><html:label>Mathpix App Key <html:input id="bilingualreader-cloud-mathpix-key" type="password" autocomplete="off"/></html:label><html:label>Mathpix App ID <html:input id="bilingualreader-cloud-mathpix-model" type="text"/></html:label></html:div>
     <html:div id="bilingualreader-cloud-llamaparse-section" hidden="hidden">
       <html:label for="bilingualreader-cloud-llamaparse-key">LlamaParse API Key</html:label>

@@ -1,10 +1,10 @@
 import type { NativeBlock, NativeDocument, NativePage, NativeParser, NativeBlockType } from "./pdfNativeModel";
 
-export type CloudParser = Extract<NativeParser, "mineru" | "mistral" | "llamaparse" | "doc2x" | "mathpix">;
+export type CloudParser = Extract<NativeParser, "mineru" | "mistral" | "llamaparse" | "doc2x" | "mathpix" | "paddleocr">;
 export function isCloudParser(value: unknown): value is CloudParser {
-  return value === "mineru" || value === "mistral" || value === "llamaparse" || value === "doc2x" || value === "mathpix";
+  return value === "mineru" || value === "mistral" || value === "llamaparse" || value === "doc2x" || value === "mathpix" || value === "paddleocr";
 }
-export const CLOUD_NAMES = { mineru: "MinerU", mistral: "Mistral OCR", llamaparse: "LlamaParse", doc2x: "Doc2X", mathpix: "Mathpix" };
+export const CLOUD_NAMES = { mineru: "MinerU", mistral: "Mistral OCR", llamaparse: "LlamaParse", doc2x: "Doc2X", mathpix: "Mathpix", paddleocr: "PaddleOCR" };
 
 function pageBlock(page: NativePage, source: CloudParser, text: string,
   type: NativeBlockType, order: number): NativeBlock {

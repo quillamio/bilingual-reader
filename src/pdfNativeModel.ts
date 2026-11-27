@@ -5,7 +5,7 @@
  * heuristically recovered reading order without affecting the source pages.
  * This module does not access Zotero's SDT structure or #sdt-content.
  */
-export type NativeParser = "pdfjs" | "docling" | "mineru" | "mistral" | "llamaparse" | "doc2x" | "mathpix";
+export type NativeParser = "pdfjs" | "docling" | "mineru" | "mistral" | "llamaparse" | "doc2x" | "mathpix" | "paddleocr";
 export type NativeBlockType =
   | "heading" | "paragraph" | "caption" | "table"
   | "picture" | "formula" | "footnote";
@@ -47,6 +47,7 @@ export const PDF_PARSER_NAMES: Record<NativeParser, string> = {
   llamaparse: "LlamaParse",
   doc2x: "Doc2X",
   mathpix: "Mathpix",
+  paddleocr: "PaddleOCR",
 };
 
 export function describePDFParser(document: NativeDocument, selected: NativeParser): string {
