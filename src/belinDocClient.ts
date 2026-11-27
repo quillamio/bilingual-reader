@@ -15,7 +15,7 @@ export function belinData(value: any): any {
   return value.data;
 }
 export function signedBelinURL(value: unknown): string {
-  if (typeof value !== "string" || /[\s\u0000-\u001f\u007f]/u.test(value)) throw new Error("BelinDoc 返回无效存储地址。");
+  if (typeof value !== "string" || /\s/u.test(value) || Array.from(value).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error("BelinDoc 返回无效存储地址。");
   let url: URL;
   try { url = new URL(value); } catch (_) { throw new Error("BelinDoc 返回无效存储地址。"); }
   const allowed = ["belindoc.com","amazonaws.com","amazonaws.com.cn","aliyuncs.com","myqcloud.com","r2.cloudflarestorage.com"];
@@ -56,12 +56,16 @@ export function belinUploadHeaders(url: string, disposition = DEFAULT_BELIN_CONT
 const BELIN_STORAGE_CODES = new Set(["SignatureDoesNotMatch","AccessDenied","ExpiredToken","InvalidToken","RequestExpired","AuthorizationHeaderMalformed","InvalidRequest","BadDigest","EntityTooLarge","NoSuchKey","SlowDown","RequestTimeTooSkewed"]);
 export class BelinStorageHTTPError extends Error {
   readonly code?: string;
-  constructor(readonly status: number, readonly operation: "upload" | "download", xml = "") {
+  readonly status: number;
+  readonly operation: "upload" | "download";
+  constructor(status: number, operation: "upload" | "download", xml = "") {
     const match = xml.length <= 32768 ? /<Code>\s*([A-Za-z]+)\s*<\/Code>/u.exec(xml) : null;
     const code = match && BELIN_STORAGE_CODES.has(match[1]) ? match[1] : undefined;
     const hint = code === "SignatureDoesNotMatch" && operation === "upload" ? "；签名请求头或其值不一致，请核对服务方要求的 Content-Disposition 和 Content-Type" : "";
     super("BelinDoc "+(operation === "upload" ? "上传" : "下载")+"失败（HTTP "+status+(code ? " "+code : "")+"）"+hint+(operation === "upload" ? "；本次尚未提交翻译任务。" : "；请检查已提交的云端任务历史，勿重复扣费。"));
     this.name = "BelinStorageHTTPError";
+    this.status = status;
+    this.operation = operation;
     this.code = code;
   }
 }
