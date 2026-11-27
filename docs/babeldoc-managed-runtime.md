@@ -1,0 +1,38 @@
+# Managed BabelDOC runtime (implementation plan and acceptance contract)
+
+## Goal
+
+User selects "professional local layout", chooses a translation service and enters its own API key (or a supported local/free service), then approves a one-time engine download. Zotero owns installation, start, cancellation and attachment import. No required Python, pip, terminal, Docker, persistent server, separate translation subscription or system-wide environment change. Local compute and initial download still have costs. An external translation engine can still charge or send text to a remote provider.
+
+The existing scripts/local_pdf_server.py and localPDFExport.ts are a manual, opt-in bridge. Keep them for advanced users; do not confuse this with managed deployment. The new managed mode is not enabled until a verified runtime and real platform tests exist.
+
+## Upstream and version selection
+
+- BabelDOC (AGPL-3.0): https://github.com/funstory-ai/BabelDOC ; initial packaging candidate 0.7.1, verify the latest security advisories and compatible versions before each release. Do not use an old portable v1 binary or an unfixed BabelDOC <=0.6.4. Upstream release notes: https://github.com/funstory-ai/BabelDOC/releases ; PyPI https://pypi.org/project/BabelDOC/ .
+- PDFMathTranslate-next (AGPL-3.0): https://github.com/PDFMathTranslate-next/PDFMathTranslate-next . Optional CLI adapter only when its pinned BabelDOC dependency is also security-supported and the platform smoke test passes.
+- Reference https://github.com/coderirse/zotero-fulltext-pdf-translate (AGPL-3.0). Its automatic portable download is PDF2zh v1 for Windows; its v2/BabelDOC path and macOS/Linux require manual setup. Use its workflow as a reference, not as a distribution source or claim that v2 automatic installation already works. Also evaluate https://github.com/liuwenbo0/zotero-local-translate and https://github.com/daniel5u/zotero-paper-translator for Zotero integration patterns. No source code copied in this stage.
+- BabelDOC official CLI supplies --warmup, --generate-offline-assets, --restore-offline-assets. Build and validate pinned offline model/font bundles instead of silently fetching on first translation. Reference https://github.com/funstory-ai/BabelDOC/blob/main/README.md.
+
+## Phased development
+
+### B1. Build and publish verified per-platform runtime artifacts (blocking)
+
+Platform matrix: macOS arm64 and x64 (both separately), Windows x64, Linux x64. Only show an install option for verified targets; arm64 Windows/Linux can be added later. macOS 15.7.1/Zotero 10.0.9 is the first live acceptance target, not a claim of support for all previous macOS versions.
+
+Use an isolated, redistributable Python 3.12 runtime (verify platform-specific interpreter availability and licensing), pinned BabelDOC and complete dependency lock with hashes and target-compatible wheels. Avoid shipping a virtual environment with absolute shebangs or symlinks into a CI machine. Produce an offline wheelhouse and/or demonstrably relocatable runtime; run from a path with spaces and Unicode on a machine with no preinstalled Python. Include offline model/font assets only after verifying their independent licenses; otherwise download official versioned assets with integrity verification and consent. Record exact upstream versions, SBOM, SHA-256, compressed/unpacked size, target platform/architecture, entry point, minimum OS, source/license notices. Build from pinned upstream source/wheels with artifact provenance. Validate archives against traversal, symlinks, special files, duplicate paths, decompression limits and unexpected executable entry points. Do not publish unverified executable artifacts.
+
+### B2. Zotero RuntimeManager
+
+Explicit installation approval (disk size, download source, licenses, provider privacy). Fixed release manifest from the project, release version selected by plugin code, SHA-256 of every asset pinned in the signed/trusted manifest shipped with XPI. No latest/mirror fallback, arbitrary user URL, curl|shell or sudo. Download to a temporary private profile path with timeout, progress, cancellation and bounded size; verify before extraction; extract safely to staging; verify file manifest; atomically activate a version after self-check. Preserve previous known-good version; uninstall only plugin-owned paths. No global PATH changes. Runtime cannot execute before all checks. Offline reinstall from identical verified archive possible. Keep installer state and translation state separate.
+
+### B3. Job control and translation adapter
+
+Prefer one job-scoped subprocess with explicit argv and stdout protocol containing only allowlisted status fields, no source text, keys or paths. Alternative: authenticated random-port loopback bridge, one job per process and explicit lifecycle. No shell invocation, user-controlled command flags or command-line API key. Keep API key in short-lived private config or stdin and delete after exit; no logging, telemetry or persistent plaintext config by default. Fixed service-specific endpoints or separately confirmed custom endpoint; no automatic paid fallback. Use the current selected provider where supported, do not invent support for every translator. Terminate process tree on cancellation/timeout and clean temporary files even on Zotero exit. If CLI uses remote assets or text provider, disclose before running. Handle missing GPU by CPU mode, not automatic paid cloud.
+
+### B4. PDF acceptance and release gate
+
+Use engine's native translated PDF and original page vector content; prefer native dual layout only after checking its orientation/semantics. Otherwise pair mono translation and original only when verified page mapping is one-to-one; reject mismatched page count rather than guessing. Detect incomplete or zero-length output; validate PDF syntax, page counts and document markers; import once into parent Zotero item, keep original unchanged. Non-destructive fallback to existing internal layout only with user consent. No automatic deletion/overwrite of source. Test font rendering, searchable text, formulas, tables, figures, multi-column reading order, rotations, crop offsets, overflow, references, long Unicode paths, cancellation, cold install without Python, corrupted package, unsupported platform, disk full, interrupted download, update/rollback, stale job and no-key leakage. For JACC and XunZi use private originals on authorized test machines; public CI uses synthetic and redistributable fixtures. Record actual placement and semantic completeness separately; no "perfect translation" claim. Require real macOS, Windows and Linux runs for each supported target, not just TypeScript compilation. Release only after complete CI and real single-page and multi-column layout tests.
+
+## First implementation increment
+
+The parser adapter already supplies a cloud alternative (PaddleOCR); this document defines the managed local layout acceptance gate. Runtime artifact production, installer UI, process lifecycle and real engine deployment are still unimplemented. Keep the existing manual bridge until those are complete.

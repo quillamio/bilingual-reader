@@ -190,3 +190,6 @@ BelinDoc 实测补充：S3 上传签名失败时保留 HTTP 403 与脱敏错误�
 
 ### PaddleOCR 官方版面解析（实验性）
 选择 PaddleOCR 解析引擎，仅需填写 AI Studio Access Token，默认 PaddleOCR-VL-1.6，也支持 PP-StructureV3 等。使用官方异步文档解析，读取结构化区域、顺序和坐标，原位替换须经过 PDF.js 实际文字线框核验；图表、公式与未知区域不直接擦除。解析额度取决于 AI Studio 账户政策，翻译引擎仍独立配置。本批次参考 [PaddleOCR 官方 API](https://www.paddleocr.ai/main/version3.x/inference_deployment/serving/paddleocr_official_api/typescript.html) 和 [官方异步协议](https://ai.baidu.com/ai-doc/AISTUDIO/fml7mozw5) 独立实现，不随插件分发 PaddleOCR SDK 或模型。[使用说明](docs/external-backends.md)。
+
+### BabelDOC 自动部署（长期开发）
+目标是首次授权下载校验后的本机专业排版运行包，之后无需手动安装 Python 或启动服务。已制定分平台安全构建、资产校验、安装生命周期、PDF 验收及回滚规范：[开发与验收任务书](docs/babeldoc-managed-runtime.md)。目前仍为手动本机桥接，尚未提供可自动安装的便携版。参考 zotero-fulltext-pdf-translate（AGPL-3.0）的引擎管理设计，本阶段未复制其代码。
