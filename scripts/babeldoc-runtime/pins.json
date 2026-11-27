@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "babeldoc": {
+    "version": "0.7.1",
+    "source": "https://github.com/funstory-ai/BabelDOC/tree/d922e2b0c5a353bde8731921eb442c07ae75849d",
+    "sdistSha256": "05a27d19e0b02e6afb4ca2946fa6fe7b431658d534628de33afd10d93d888b34"
+  },
+  "python": {
+    "version": "3.12.16",
+    "release": "20261124",
+    "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261124"
+  },
+  "targets": {
+    "macos-arm64": {
+      "triple": "aarch64-apple-darwin",
+      "pythonSha256": "431b99a9c2cdd37ad9b06e425be0e520d2dbce0552abe454257abef592fe3634",
+      "pythonSize": 25399370,
+      "wheelSha256": "55d9b630e60f61704a7c032ab05a7f8a181e45f6ca2e2f5590b0071d2d11bfc9"
+    },
+    "macos-x64": {
+      "triple": "x86_64-apple-darwin",
+      "pythonSha256": "ccce24cfd3f56f62561d2c9480fcc567ca3a9bac68450cd73e11aeb631befa1f",
+      "pythonSize": 25113881,
+      "wheelSha256": "76ebe8f9da7ac638b61226d0f6edae22bc7e1565bfe3e40fb9b4f28b44280a7c"
+    },
+    "windows-x64": {
+      "triple": "x86_64-pc-windows-msvc",
+      "pythonSha256": "8152ff5b6c6c044ddbbaa3531dda59cb9ce5bd6cb670d4c9ac2e3ab91afa8778",
+      "pythonSize": 47497711,
+      "wheelSha256": "ed0fff589afde6751fa2c25077bd59676fbebb5c285af5f552f3f2ac747dcff9"
+    },
+    "linux-x64": {
+      "triple": "x86_64-unknown-linux-gnu",
+      "pythonSha256": "6774c7f49ee21c1723f7ac91961a5bf9f3ee3ae6e4d82ff58bd358958b546461",
+      "pythonSize": 68209387,
+      "wheelSha256": "8ffe2efe4d6e2f4a38cd400e41dd9839664b7932aade95275defcf0d023cdbb4"
+    }
+  }
+}
