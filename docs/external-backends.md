@@ -17,3 +17,5 @@ https://doclingo.ai/zh/doclingoApi confirms paid API; free website characters ca
 
 ## Diagnostics
 Last 300 allowlisted in-memory events only. No manuscript text, URLs, file names, task IDs, keys or raw exceptions. View/refresh/clear in preferences; manually copy report. Raw upstream/Zotero logs outside this report are not certified sanitized. No telemetry upload.
+
+2026-11-27: official Doclingo launch article links to https://doclingo.cn/en/doclingoApi/ApiDoc (redirects to doclingo.vip); both that route and the Chinese developer page could not be retrieved in the current verification. Obtain the authenticated documentation from the developer console or support@doclingo.ai before implementing any request. No guessed endpoints.

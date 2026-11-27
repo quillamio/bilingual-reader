@@ -35,3 +35,13 @@ test("business auth errors sanitized",()=>{assert.throws(()=>belinData({code:"30
 test("SSE refuses missing DONE, wrong order and untrusted storage",()=>{assert.throws(()=>belinDownloadURL("event:[PROCESS]\ndata:{}", "order"));assert.throws(()=>belinDownloadURL('event:[DONE]\ndata:{"translateOrderNo":"other","url":"https://example.s3.amazonaws.com/a"}',"order"));for(const u of ["http://a.amazonaws.com/a","https://amazonaws.com.evil.test/a","https://127.0.0.1/a","https://user:pass@a.amazonaws.com/a"])assert.throws(()=>signedBelinURL(u));});
 test("non-PDF downloads rejected",async()=>{const f=fixture({malformed:true});await assert.rejects(translateBelinPDF(f.request,bytes,f.options),/完整 PDF/);assert.throws(()=>checkBelinPDF(bytes.slice(0,-6)));});
 test("invalid key and cancellation prevent all requests",async()=>{const f=fixture();await assert.rejects(translateBelinPDF(f.request,bytes,{...f.options,key:""}));await assert.rejects(translateBelinPDF(f.request,bytes,{...f.options,check:()=>{throw Error("cancelled");}}));assert.equal(f.calls.length,0);});
+
+test("malicious signed URL never receives the source PDF or API key",async()=>{
+ const f=fixture();let writes=0;
+ const request=async(method,url,headers,body,type)=>{
+   if(method==="PUT")writes++;
+   if(url.endsWith("batchPresignedUploadUrl"))return wrap([{objectKey:"x",storageType:1,persignedUploadUrl:"https://evil.example/upload"}]);
+   return f.request(method,url,headers,body,type);
+ };
+ await assert.rejects(translateBelinPDF(request,bytes,f.options),/存储地址/);assert.equal(writes,0);
+});

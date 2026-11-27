@@ -8,3 +8,13 @@ test("storage rejects unsafe or unrelated URLs",()=>{for(const u of ["http://exa
 test("polling timeout never creates another Doc2X task",async()=>{let n=0;const req=async(method,url)=>{if(url.endsWith("preupload")){n++;return {code:"success",data:{uid:"x",url:"https://example.s3.amazonaws.com/x"}};}if(method==="PUT")return;return {code:"success",data:{status:"processing"}};};await assert.rejects(parseDoc2X(req,bytes,"k","v2",control),/超时/);assert.equal(n,1);});
 test("Mathpix multipart and privacy flag; correct physical page",async()=>{const req=async(method,url,h,body)=>{assert.equal(h.app_id,"app");assert.equal(h.app_key,"key");if(method==="POST"){assert.ok(new TextDecoder().decode(body).includes('"improve_mathpix":false'));return {pdf_id:"abc"};}if(url.endsWith(".lines.json"))return {pages:[{page:1,lines:[{text_display:"paragraph"},{text:"omit",conversion_output:false}]}]};return {status:"completed"};};assert.deepEqual(await parseMathpix(req,bytes,"app","key",control),[{index:0,markdown:"paragraph"}]);assert.throws(()=>mathpixForm(bytes,"\r\n"));});
 test("cancel or missing credentials prevent submission",async()=>{let n=0;const req=async()=>{n++;};await assert.rejects(parseMathpix(req,bytes,"","key",control));await assert.rejects(parseDoc2X(req,bytes,"key","v2",{...control,check(){throw Error("cancelled");}}));assert.equal(n,0);});
+
+test("untrusted upload URL rejected before PDF transfer",async()=>{
+ let writes=0;
+ const req=async(method)=>{if(method==="PUT")writes++;return {code:"success",data:{uid:"safe",url:"https://evil.example/input"}};};
+ await assert.rejects(parseDoc2X(req,bytes,"key","v2",control),/存储地址/);assert.equal(writes,0);
+});
+test("cloud failure responses never echo provider secrets",async()=>{
+ await assert.rejects(parseDoc2X(async()=>({code:"error",message:"SECRET"}),bytes,"key","v2",control),e=>!e.message.includes("SECRET"));
+ await assert.rejects(parseMathpix(async()=>({pdf_id:"../SECRET"}),bytes,"app","key",control),e=>!e.message.includes("SECRET"));
+});

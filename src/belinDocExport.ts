@@ -25,6 +25,16 @@ export async function exportBelinDoc(reader: any, button: HTMLButtonElement | nu
       task?.throwIfCancelled();
       if (headers["X-Api-Key"] && !url.startsWith(BELIN_BASE)) throw new Error("拒绝向存储地址发送 API Key。");
       try {
+        if (!headers["X-Api-Key"]) {
+          const main=Zotero.getMainWindow(),abort=new main.AbortController();
+          try {
+            return await withPDFOperationDeadline("BelinDoc 存储请求",180000,async()=>{
+              const response=await main.fetch(url,{method,body:body as ArrayBuffer|undefined,headers,credentials:"omit",redirect:"error",cache:"no-store",signal:abort.signal});
+              if(!response.ok) throw new Error("存储请求失败");
+              return responseType==="arraybuffer"?await response.arrayBuffer():await response.text();
+            },()=>abort.abort(),task);
+          } finally {abort.abort();}
+        }
         const xhr = await withPDFOperationDeadline<any>("BelinDoc 请求",180000,
           () => Zotero.HTTP.request(method,url,{body,headers,responseType,timeout:175000,followRedirects:false,noCache:true,debug:false} as any),undefined,task);
         if (xhr.status < 200 || xhr.status >= 300) throw new Error("HTTP " + xhr.status);

@@ -42,6 +42,8 @@ async function fetchTranslation(
       headers,
       responseType,
       timeout: getRequestTimeoutMs(),
+      followRedirects: false,
+      debug: false,
     };
     if (data !== undefined) options.body = typeof data === "string" ? data : JSON.stringify(data);
     const xhr = await Zotero.HTTP.request(method, url, options);

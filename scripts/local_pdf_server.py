@@ -83,6 +83,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         parsed = urlsplit(self.path)
         params = parse_qs(parsed.query)
+        if set(params) != {"engine", "output"} or any(len(values) != 1 for values in params.values()):
+            self.reply(400,b"Invalid parameters")
+            return
         engine = params.get("engine", [""])[0]
         mode = params.get("output", [""])[0]
         if parsed.path != "/translate" or engine not in ENGINES or mode not in ("mono", "dual"):
