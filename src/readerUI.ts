@@ -1,4 +1,4 @@
-import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName } from "./pdfExportUtils";
+import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName, withPDFPrintDeadline } from "./pdfExportUtils";
 import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAssets";
 import { getPDFExportLayout, getTranslateAllPages } from "./settings";
 import { getNativePDFBackend } from "./pdfNativeDocling";
@@ -428,7 +428,9 @@ export async function printHTMLToPDF(
     settings.footerStrCenter = "";
     settings.footerStrRight = "";
 
-    await browsingContext.print(settings);
+    // A hung Gecko print must reach finally so the hidden browser is destroyed.
+    // Allow longer for a whole-document reflow than for a positioned page.
+    await withPDFPrintDeadline(() => browsingContext.print(settings), size ? 120000 : 300000);
     await waitForGeneratedFile(tempFile);
   } finally {
     try {
@@ -618,8 +620,11 @@ export function renderReaderExportButton(event: any): void {
         "将当前中英对照结果导出为 PDF 并添加到文献附件",
         (button) => {
           if (button.disabled) return;
+          const oldTitle = button.title;
           button.disabled = true;
           void exportBilingualPDF(reader, button).finally(() => {
+            button.title = oldTitle;
+            button.setAttribute("aria-label", oldTitle);
             button.disabled = false;
           });
         },

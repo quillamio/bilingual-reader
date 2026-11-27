@@ -4,6 +4,8 @@ import {
   configureBilingualPDFPrintSettings,
   hasCompletePDFMarkers,
   sanitizeExportFileBaseName,
+  PDFPrintTimeoutError,
+  withPDFPrintDeadline,
 } from "../src/pdfExportUtils.ts";
 
 test("short titles and existing suffixes", () => {
@@ -83,4 +85,27 @@ test("legacy Zotero WrappedNative without new page-rule properties remains suppo
   assert.equal(settings.marginLeft, 0);
   assert.equal(settings.shrinkToFit, false);
   assert.equal(Object.hasOwn(settings, "honorPageRuleMargins"), false);
+});
+
+
+test("print deadline preserves success", async () => {
+  assert.equal(await withPDFPrintDeadline(async () => "printed", 1000), "printed");
+});
+
+test("print deadline preserves original rejection", async () => {
+  const failure = new Error("printer error");
+  await assert.rejects(withPDFPrintDeadline(async () => { throw failure; }, 1000), error => error === failure);
+});
+
+test("never-settling print rejects and a later failure is observed", async () => {
+  let rejectPrint;
+  const pending = new Promise((_, reject) => { rejectPrint = reject; });
+  await assert.rejects(withPDFPrintDeadline(() => pending, 15), PDFPrintTimeoutError);
+  rejectPrint(new Error("late print failure"));
+  await new Promise(resolve => setTimeout(resolve, 10));
+});
+
+test("synchronous print failure is preserved", async () => {
+  const failure = new Error("synchronous printer error");
+  await assert.rejects(withPDFPrintDeadline(() => { throw failure; }, 1000), error => error === failure);
 });

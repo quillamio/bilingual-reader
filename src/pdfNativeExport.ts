@@ -9,6 +9,7 @@ import { buildBatchPayload, packBatchItems, parseBatchResult, splitTextForReques
   type BatchInput } from "./translationPipeline";
 import { translateText } from "./bilingualReader";
 import { printHTMLToPDF, importExportedPDF } from "./readerUI";
+import { PDFPrintTimeoutError } from "./pdfExportUtils";
 import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "./pdfNativeDocling";
 import { getNormalPDFProxy, getPDFPageLayout, parseNormalPDFWithPDFJS, renderPDFRegion } from "./pdfNativeRuntime";
 import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
@@ -170,6 +171,7 @@ export async function supplementReadingPDFPages(
     }
     return { ...source, blocks };
   });
+  progress(button, "正在准备补译遗漏段落…");
   const translated = await translateNativeDocument({
     ...physical, pages: targets.map(page => ({ ...page, blocks: page.blocks.filter(block => !reused.has(block.id)) })),
   }, attachment.id, String(attachment.key || attachment.id),
@@ -219,7 +221,7 @@ export async function saveSideBySidePDF(
       await printHTMLToPDF(html, temp, geometry);
       return await readPDFFile(temp);
     } finally {
-      if (temp.exists()) temp.remove(false);
+      try { if (temp.exists()) temp.remove(false); } catch (_) { /* Preserve the original print error. */ }
     }
   }
   async function* transcripts() {
@@ -240,15 +242,19 @@ export async function saveSideBySidePDF(
               Zotero.getMainWindow().document, png, geometry, page.paragraphs,
             );
             if (prepared.placed) {
+              progress(button, "正在打印右侧译文：" + (page.pageIndex + 1) + "/" + pages.length);
               bytes = await print(prepared.html, geometry);
               placed += prepared.placed;
               remaining = prepared.remaining;
             }
           }
         } catch (error) {
+          // A timed-out printer may still be writing; never retry into the same path.
+          if (error instanceof PDFPrintTimeoutError) throw error;
           Zotero.logError(error as Error);
         }
       }
+      if (remaining.length) progress(button, "正在打印译文续页：" + (page.pageIndex + 1) + "/" + pages.length);
       const continuation = remaining.length
         ? await print(buildTranslatedPageHTML({ ...page, paragraphs: remaining, continuation: true }))
         : undefined;

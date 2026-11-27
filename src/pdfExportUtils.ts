@@ -124,3 +124,26 @@ export function configureBilingualPDFPrintSettings(settings: any, size?: { width
   if ("ignoreUnwriteableMargins" in settings) settings.ignoreUnwriteableMargins = true;
   if ("usePageRuleSizeAsPaperSize" in settings) settings.usePageRuleSizeAsPaperSize = true;
 }
+
+
+export class PDFPrintTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`PDF 打印超过 ${Math.round(timeoutMs / 1000)} 秒，已停止等待；请重试或改用其他导出方式。`);
+    this.name = "PDFPrintTimeoutError";
+  }
+}
+
+/** Bound Gecko's print promise; the caller owns browser and temporary-file cleanup. */
+export async function withPDFPrintDeadline<T>(
+  print: () => Promise<T>, timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PDFPrintTimeoutError(timeoutMs)), timeoutMs);
+    });
+    return await Promise.race([deadline, Promise.resolve().then(print)]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
