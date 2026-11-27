@@ -1,3 +1,4 @@
+import { recordDiagnostic } from "./taskDiagnostics";
 import { configureBilingualPDFPrintSettings, hasCompletePDFMarkers, normalizeExportContent, sanitizeExportFileBaseName, withPDFPrintDeadline } from "./pdfExportUtils";
 import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAssets";
 import { getPDFExportLayout, getTranslateAllPages, getPDFExportProvider } from "./settings";
@@ -362,6 +363,7 @@ export async function importExportedPDF(tempFile: any, sourceAttachment: any, su
   });
   attachment.setField("title", `${parentTitle || "文献"} - ${suffix}`);
   await attachment.saveTx();
+  recordDiagnostic(getPDFExportProvider(),"export","success");
   return attachment;
 }
 
@@ -661,7 +663,10 @@ export function renderReaderExportButton(event: any): void {
           button.textContent = "⏹️";
           button.title = "正在导出，点击停止";
           button.setAttribute("aria-label", button.title);
+          const provider = getPDFExportProvider();
+          recordDiagnostic(provider,"export","start");
           void exportBilingualPDF(reader, button, task).catch(error => {
+            recordDiagnostic(provider,"export",task.cancelled?"cancelled":"failure");
             if (!task.cancelled && !(error instanceof PDFExportCancelledError)) {
               Zotero.logError(error as Error);
               showMessage(reader, String((error as Error).message || error));

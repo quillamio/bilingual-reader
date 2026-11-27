@@ -799,6 +799,42 @@ ${error?.stack || ""}`);
     }
   });
 
+  for (const [id, endpoint] of [
+    ["siliconflow", "https://api.siliconflow.cn/v1/chat/completions"],
+    ["openrouter", "https://openrouter.ai/api/v1/chat/completions"],
+    ["googlecloud", "https://translation.googleapis.com/language/translate/v2"],
+  ]) {
+    it("uses fixed official endpoint and independent credential for " + id, async function () {
+      const names = ["secret", "model", "revision"];
+      const prefix = "extensions.zotero.bilingualreader.services." + id + ".";
+      const old = names.map(name => Zotero.Prefs.get(prefix + name, true));
+      const request = Zotero.HTTP.request;
+      try {
+        updateServiceSettings(id, { secret: "mock-only", model: "mock-model" });
+        (Zotero.HTTP as any).request = async (method: string, url: string, options: any) => {
+          assert.equal(method, "POST"); assert.equal(url, endpoint);
+          const body = JSON.parse(options.body);
+          if (id === "googlecloud") {
+            assert.equal(options.headers["X-Goog-Api-Key"], "mock-only");
+            assert.equal(body.q, "Sample text"); assert.equal(body.target, "zh-CN");
+            return { status: 200, response: { data: { translations: [{ translatedText: "测试译文" }] } } };
+          }
+          assert.equal(options.headers.Authorization, "Bearer mock-only");
+          assert.equal(body.model, "mock-model");
+          assert.equal(body.messages[1].content, "Sample text");
+          return { status: 200, response: { choices: [{ message: { content: "测试译文" } }] } };
+        };
+        assert.equal(await translateNativeParagraph("Sample text", id), "测试译文");
+      } finally {
+        (Zotero.HTTP as any).request = request;
+        names.forEach((name, index) => {
+          if (old[index] === undefined) Zotero.Prefs.clear(prefix + name, true);
+          else Zotero.Prefs.set(prefix + name, old[index], true);
+        });
+      }
+    });
+  }
+
   it("should render independent per-service input fields on selection", async function () {
     this.timeout(10000);
     const prefix = "extensions.zotero.bilingualreader.";

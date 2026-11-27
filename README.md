@@ -178,3 +178,5 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 - [Bob](https://github.com/ripperhe/Bob) 与 [Easydict](https://github.com/tisfeng/Easydict)：翻译工具设计参考，本批次未复制源码。
 - Doc2X、Mathpix、SiliconFlow、OpenRouter、Google Cloud、BelinDoc：通过公开 API 协议独立实现，不表示获得其专有软件的再分发许可；使用受各服务条款约束。
 - @pdf-lib/fontkit（MIT）、Noto Sans CJK SC（SIL OFL 1.1）：字体依赖及许可证按构建分发。诊断报告不自动上传。
+
+字体兼容性回归：第8项实测发现 CFF/OTF 子集可提取但在 MuPDF 中无可见中文字形；构建改用同一固定上游提交的 Noto Sans SC TrueType 变体，保留原有中文可见性检查，待 CI 验证。Fontkit 上游 MIT 授权全文已补入 addon/content/licenses/pdf-export-dependencies.txt。

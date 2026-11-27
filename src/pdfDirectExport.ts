@@ -5,7 +5,7 @@ import { wrapPDFText, requirePDFGlyphs } from "./pdfDirectText";
 import { withPDFOperationDeadline } from "./pdfOperationDeadline";
 import type { PDFExportTask } from "./pdfExportTask";
 
-const FONT_URL = "chrome://bilingualreader/content/fonts/NotoSansCJKsc-Regular.otf";
+const FONT_URL = "chrome://bilingualreader/content/fonts/NotoSansSC-VF.ttf";
 let cachedFont: Uint8Array | undefined;
 async function loadBundledFont(task?: PDFExportTask): Promise<Uint8Array> {
   task?.throwIfCancelled();
@@ -24,7 +24,7 @@ async function loadBundledFont(task?: PDFExportTask): Promise<Uint8Array> {
       xhr.send();
     }), () => xhr.abort(), task);
     const bytes = new Uint8Array(response);
-    if (bytes.length !== 16437364) throw new Error("内置中文字体缺失或不完整。");
+    if (bytes.length !== 17773132) throw new Error("内置中文字体缺失或不完整。");
     cachedFont = bytes;
   }
   return cachedFont;

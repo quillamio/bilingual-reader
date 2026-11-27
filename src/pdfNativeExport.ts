@@ -1,3 +1,4 @@
+import { recordDiagnostic } from "./taskDiagnostics";
 /**
  * Export using native PDF parsing or an existing MinerU reading result.
  * Side-by-side embeds original PDF pages; stacked prints the parsed transcript.
@@ -261,6 +262,7 @@ export async function saveSideBySidePDF(
           if (task?.cancelled || error instanceof PDFExportCancelledError || error instanceof PDFOperationTimeoutError || renderer === "direct") throw error;
           // Only retry the current page; never discard completed pages or send text to a service.
           fallbackPages++;
+          recordDiagnostic("local","fallback","start");
           Zotero.logError(new Error("直接 PDF 生成失败，使用兼容打印。"));
         }
       }

@@ -127,7 +127,7 @@ print("PASS: direct PDF contains searchable Chinese in both columns.")
 # successful PDF parsing. Search coordinates and rendered pixels are independent.
 with fitz.open(path.with_name("side-by-side-export.pdf")) as direct:
     sheet = direct[0]
-    fonts = [font for font in sheet.get_fonts(full=True) if "NotoSansCJK" in font[3]]
+    fonts = [font for font in sheet.get_fonts(full=True) if "NotoSansSC" in font[3] or "NotoSansCJK" in font[3]]
     assert fonts, "Missing embedded Noto CJK font"
     assert any(direct.extract_font(font[0])[3] for font in fonts), "Missing font program"
     for marker in ("左栏原位译文", "右栏原位译文"):
