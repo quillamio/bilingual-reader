@@ -13,6 +13,10 @@ const context = await Config.loadConfig({
 });
 // Scaffold Test uses .scaffold/test/profile and .scaffold/test/data exclusively.
 const runner = new Test(context);
+// Scaffold 0.8.2 forces Linux/Xvfb preparation in CI in its constructor.
+// Windows/macOS already have a native Zotero binary; keep Gecko's -headless
+// argument but skip the Linux-only dependency installer.
+if (process.platform !== "linux") context.test.headless = false;
 await runner.run();
 // Keep native exceptions as well as scaffold's structured test summary.
 const nativeLog = createWriteStream(".scaffold/review-zotero.log");
