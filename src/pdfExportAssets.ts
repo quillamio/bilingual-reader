@@ -1,3 +1,4 @@
+import { PDF_DEADLINES, withPDFOperationDeadline } from "./pdfOperationDeadline";
 /**
  * Freeze images in the current SDT reader before printing its cloned HTML.
  *
@@ -103,10 +104,12 @@ async function loadImageBytes(url: string, doc: Document): Promise<{ body: Array
     if (!win || typeof win.fetch !== "function") {
       throw new Error("Reader blob URL is not accessible.");
     }
-    const response = await win.fetch(url, { credentials: "omit" });
-    if (!response.ok) throw new Error("Cannot load reader blob image.");
-    const blob = await response.blob();
-    return { body: await blob.arrayBuffer(), mime: mimeFor(url, blob.type) };
+    return withPDFOperationDeadline("阅读模式图片读取", PDF_DEADLINES.image, async () => {
+      const response = await win.fetch!(url, { credentials: "omit" });
+      if (!response.ok) throw new Error("Cannot load reader blob image.");
+      const blob = await response.blob();
+      return { body: await blob.arrayBuffer(), mime: mimeFor(url, blob.type) };
+    });
   }
   const xhr = await Zotero.HTTP.request("GET", url, {
     responseType: "arraybuffer",

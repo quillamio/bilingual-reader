@@ -1,4 +1,5 @@
 import type { NativeRect } from "./pdfNativeModel";
+import { PDF_DEADLINES, withPDFOperationDeadline } from "./pdfOperationDeadline";
 
 export interface PositionedPDFPage {
   pageIndex: number;
@@ -75,7 +76,8 @@ export async function buildInPlacePageHTML(
   const canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas") as HTMLCanvasElement;
   const image = doc.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
   image.src = original;
-  await image.decode();
+  await withPDFOperationDeadline("原位页面图像解码", PDF_DEADLINES.image,
+    () => image.decode(), () => image.removeAttribute("src"));
   canvas.width = image.naturalWidth;
   canvas.height = image.naturalHeight;
   const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D | null;

@@ -3,13 +3,14 @@
  * Side-by-side embeds original PDF pages; stacked prints the parsed transcript.
  */
 import { getEngine, getCacheEngineTag, getMaxCharsPerRequest, getRequestGapMs,
-  getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, type PDFExportLayout } from "./settings";
+  getTranslationPageCount, getTranslateAllPages, getMaxConsecutiveErrors, getRequestTimeoutMs, type PDFExportLayout } from "./settings";
 import { loadCachedTranslation, saveCachedTranslation } from "./translationCache";
 import { buildBatchPayload, packBatchItems, parseBatchResult, splitTextForRequest,
   type BatchInput } from "./translationPipeline";
 import { translateText } from "./bilingualReader";
 import { printHTMLToPDF, importExportedPDF } from "./readerUI";
 import { PDFPrintTimeoutError } from "./pdfExportUtils";
+import { PDFOperationTimeoutError, withPDFOperationDeadline } from "./pdfOperationDeadline";
 import { getNativePDFBackend, getDoclingEndpoint, parseWithLocalDocling } from "./pdfNativeDocling";
 import { getNormalPDFProxy, getPDFPageLayout, parseNormalPDFWithPDFJS, renderPDFRegion } from "./pdfNativeRuntime";
 import { isCloudParser, CLOUD_NAMES } from "./pdfCloudModel";
@@ -57,7 +58,8 @@ async function translateSegment(
   const translated: string[] = [];
   let tag = getCacheEngineTag(undefined, engine);
   for (const chunk of chunks) {
-    const response = await translateText(chunk, itemID, engine);
+    const response = await withPDFOperationDeadline("翻译请求", getRequestTimeoutMs(),
+      () => translateText(chunk, itemID, engine));
     if (isUntranslated(chunk, response.text)) throw new Error("翻译服务返回空白、错误或与原文相同的内容。");
     translated.push(response.text);
     tag = response.engineTag;
@@ -94,6 +96,7 @@ export async function translateNativeDocument(
   const jobs = packBatchItems(pending, getMaxCharsPerRequest(), isManagedService(engine) ? 1 : 4);
   let done = 0;
   let consecutiveFailures = 0;
+  onProgress?.(0, pending.length);
   for (const job of jobs) {
     if (isCancelled?.()) throw new Error("PDF.js 翻译任务已取消。");
     let batchResults: string[] | null = null;
@@ -104,6 +107,8 @@ export async function translateNativeDocument(
         batchResults = parseBatchResult(batch.text, job.length);
         batchTag = batch.tag;
       } catch (error) {
+        // The old request may still be running; do not launch another one on timeout.
+        if (error instanceof PDFOperationTimeoutError) throw error;
         Zotero.logError(error as Error);
       }
     }
@@ -118,6 +123,7 @@ export async function translateNativeDocument(
         saveCachedTranslation(itemKey, block.text, result, engine === "pdftranslate" ? tag : engineTag, isFailure);
         consecutiveFailures = 0;
       } catch (error) {
+        if (error instanceof PDFOperationTimeoutError) throw error;
         Zotero.logError(error as Error);
         consecutiveFailures++;
         if (consecutiveFailures >= getMaxConsecutiveErrors()) {
@@ -250,7 +256,7 @@ export async function saveSideBySidePDF(
           }
         } catch (error) {
           // A timed-out printer may still be writing; never retry into the same path.
-          if (error instanceof PDFPrintTimeoutError) throw error;
+          if (error instanceof PDFPrintTimeoutError || error instanceof PDFOperationTimeoutError) throw error;
           Zotero.logError(error as Error);
         }
       }

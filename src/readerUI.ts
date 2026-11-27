@@ -3,6 +3,7 @@ import { freezePDFExportImages, preparePDFExportFigures } from "./pdfExportAsset
 import { getPDFExportLayout, getTranslateAllPages } from "./settings";
 import { getNativePDFBackend } from "./pdfNativeDocling";
 import type { PositionedPDFPage } from "./pdfInPlaceLayout";
+import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
 
 const TRANSLATION_CLASS = "bilingual-reader-translation";
 const EXPORT_BUTTON_CLASS = "bilingual-reader-export-button";
@@ -312,7 +313,8 @@ async function waitForGeneratedFile(file: any): Promise<void> {
   let stableObservations = 0;
   let sawOutput = false;
 
-  for (let i = 0; i < 300; i++) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
     try {
       if (file.exists() && file.fileSize >= 32) {
         sawOutput = true;
@@ -322,11 +324,13 @@ async function waitForGeneratedFile(file: any): Promise<void> {
 
         // Size alone does not prove the PDF has finished being written.
         if (stableObservations >= 2) {
-          const { header, tail } = await readPDFMarkers(file);
+          const { header, tail } = await withPDFOperationDeadline("打印文件完整性检查",
+            Math.min(PDF_DEADLINES.fileMarkers, Math.max(1, deadline - Date.now())), () => readPDFMarkers(file));
           if (hasCompletePDFMarkers(header, tail)) return;
         }
       }
-    } catch (_) {
+    } catch (error) {
+      if (error instanceof PDFOperationTimeoutError) throw error;
       // Printing may still be creating or flushing the file.
     }
     await Zotero.Promise.delay(100);
@@ -386,21 +390,17 @@ export async function printHTMLToPDF(
   try {
     // A local temporary file avoids huge encoded data URLs and logging PDF
     // contents in the browser's load diagnostic.
-    await (Zotero.File as any).putContentsAsync(htmlFile.path, html);
-    const loaded = await browser.load(htmlFile.path);
+    await writeTemporaryWithDeadline("打印 HTML 临时文件写入", PDF_DEADLINES.fileWrite,
+      () => (Zotero.File as any).putContentsAsync(htmlFile.path, html),
+      () => { if (htmlFile.exists()) htmlFile.remove(false); });
+    const loaded = await withPDFOperationDeadline("隐藏浏览器加载", PDF_DEADLINES.browserLoad,
+      () => browser.load(htmlFile.path));
     if (!loaded) throw new Error("用于导出的中英对照页面加载失败。");
 
     // 'interactive' is too early: lazy images may still be loading.
     // Never silently print if the ready-state actor failed.
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        browser.waitForDocument({ allowInteractiveAfter: false }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("打印页面资源加载超时，已取消导出。")), 60000);
-        }),
-      ]);
-    } finally { if (timer !== undefined) clearTimeout(timer); }
+    await withPDFOperationDeadline("打印页面资源加载", PDF_DEADLINES.browserReady,
+      () => browser.waitForDocument({ allowInteractiveAfter: false }));
 
     const browsingContext = browser.browsingContext;
     if (!browsingContext?.print) {

@@ -5,12 +5,22 @@
  * guaranteed to survive a new combined PDF; the source attachment is untouched.
  */
 import type { PDFDocument, PDFPage } from "pdf-lib";
+import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
 
 export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024): Promise<Uint8Array> {
-  const size = Number(file.fileSize);
-  if (!file.exists() || !Number.isSafeInteger(size) || size < 4 || size > maxBytes) {
+  const size = file.exists() ? Number(file.fileSize) : 0;
+  if (!Number.isSafeInteger(size) || size < 4 || size > maxBytes) {
     throw new Error("PDF 文件不存在、为空或超过允许的大小。");
   }
+  const io = (globalThis as any).IOUtils;
+  if (typeof io?.read === "function") {
+    const bytes = await withPDFOperationDeadline<Uint8Array>("PDF 文件读取", PDF_DEADLINES.fileRead,
+      () => io.read(file.path, { maxBytes: size + 1 }));
+    if (bytes.length !== size) throw new Error("读取期间 PDF 文件大小发生变化。");
+    return bytes;
+  }
+  // Legacy synchronous stream fallback: yield periodically so the UI can recover.
+  const deadline = Date.now() + PDF_DEADLINES.fileRead;
   const c = (globalThis as any).Components;
   const input = c.classes["@mozilla.org/network/file-input-stream;1"]
     .createInstance(c.interfaces.nsIFileInputStream);
@@ -25,13 +35,16 @@ export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024): Prom
       if (!chunk.length) throw new Error("读取 PDF 文件不完整。");
       bytes.set(chunk, offset);
       offset += chunk.length;
+      if (offset % 1048576 === 0) await Zotero.Promise.delay(0);
+      if (Date.now() >= deadline) throw new PDFOperationTimeoutError("PDF 文件读取", PDF_DEADLINES.fileRead);
     }
     return bytes;
   } finally { stream.close(); }
 }
 
 export async function readOriginalAttachment(attachment: any): Promise<Uint8Array> {
-  const path = await attachment.getFilePathAsync();
+  const path = await withPDFOperationDeadline<any>("原始 PDF 附件路径读取", PDF_DEADLINES.fileRead,
+    () => attachment.getFilePathAsync());
   if (!path) throw new Error("原始 PDF 尚未下载到本机。请先下载附件。");
   const file = (Zotero.File as any).pathToFile(path);
   return readPDFFile(file);
@@ -43,7 +56,9 @@ export async function writePDFFile(file: any, bytes: Uint8Array): Promise<void> 
     .createInstance(c.interfaces.nsIArrayBufferInputStream);
   const buffer = bytes.slice().buffer;
   stream.setData(buffer, 0, buffer.byteLength);
-  await (Zotero.File as any).putContentsAsync(file.path, stream);
+  await writeTemporaryWithDeadline("PDF 临时文件写入", PDF_DEADLINES.fileWrite,
+    () => (Zotero.File as any).putContentsAsync(file.path, stream),
+    () => { if (file.exists()) file.remove(false); });
 }
 
 /** Place a source page inside a panel without cropping or rasterizing it.

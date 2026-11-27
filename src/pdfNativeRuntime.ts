@@ -8,6 +8,7 @@
  * It requires an open normal PDF tab (not the SDT reflowed reading mode).
  */
 import { extractPDFJSPage, type NativeDocument, type PDFJSTextItem } from "./pdfNativeModel";
+import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline } from "./pdfOperationDeadline";
 
 interface PDFProxyHandle {
   pdf: any;
@@ -97,7 +98,12 @@ async function pdfFontWeights(page: any, items: any): Promise<Map<string, boolea
     if (typeof name === "string") names.add(name);
   }
   if ([...names].some(name => !fonts.has(name)) && typeof page.getOperatorList === "function") {
-    try { await page.getOperatorList(); } catch (_) { /* Keep geometry when font data is unavailable. */ }
+    try {
+      await withPDFOperationDeadline("PDF.js 字体信息读取", PDF_DEADLINES.font, () => page.getOperatorList());
+    } catch (error) {
+      if (error instanceof PDFOperationTimeoutError) throw error;
+      // Keep geometry when font data is unavailable.
+    }
   }
   for (const name of names) {
     if (!fonts.has(name)) continue;
@@ -128,16 +134,20 @@ export async function parseNormalPDFWithPDFJS(
     let stage = "获取页面";
     let page: any;
     try {
-      page = unwrapPDFObject(await pdf.getPage(index + 1));
+      page = unwrapPDFObject(await withPDFOperationDeadline("PDF.js 页面加载", PDF_DEADLINES.page,
+        () => pdf.getPage(index + 1)));
       if (isCancelled?.()) break;
       stage = "读取页面尺寸";
       const geometry = pdfPageGeometry(page);
       stage = "提取文字";
-      const content = unwrapPDFObject(await page.getTextContent());
+      const content = unwrapPDFObject(await withPDFOperationDeadline("PDF.js 文本提取", PDF_DEADLINES.text,
+        () => page.getTextContent()));
       stage = "整理文字坐标";
       const items: PDFJSTextItem[] = [];
       const source = content?.items;
+      stage = "读取字体信息";
       const weights = preserveTypography ? await pdfFontWeights(page, source) : undefined;
+      stage = "整理文字坐标";
       for (let i = 0; i < (source?.length || 0); i++) {
         const item = source[i];
         const t = item?.transform;
@@ -169,7 +179,8 @@ export async function snapshotPDFPage(
   contentWindow: any,
   scale = 1.25,
 ): Promise<string> {
-  const page = await pdf.getPage(pageIndex + 1);
+  const page = await withPDFOperationDeadline<any>("PDF.js 页面加载", PDF_DEADLINES.page,
+    () => pdf.getPage(pageIndex + 1));
   const viewport = page.getViewport(cloneForWindow({ scale }, contentWindow));
   // Keep canvas and PDF.js rendering context in the viewer's compartment
   // when possible. Firefox's Xray wrappers may reject a canvas context that
@@ -190,7 +201,8 @@ export async function snapshotPDFPage(
     const task = page.render(cloneForWindow({
       canvasContext: context, viewport, background: "rgb(255,255,255)",
     }, contentWindow));
-    await task.promise;
+    await withPDFOperationDeadline("PDF.js 页面渲染", PDF_DEADLINES.render,
+      () => task.promise, () => task.cancel?.());
     const image = canvas.toDataURL("image/jpeg", 0.83);
     if (!image.startsWith("data:image/jpeg;base64,") || image.length < 64) {
       throw new Error("PDF.js 页面绘制结果无效。");
@@ -210,7 +222,8 @@ export async function renderPDFRegion(reader: any, pageIndex: number, rect: numb
   const renderer = baseView?._pdfRenderer;
   if (typeof renderer?.renderRegionCrops !== "function") return "";
   const scope = baseView?._iframe?.ownerDocument?.defaultView || internal?._iframeWindow || reader?._iframeWindow;
-  const images = await renderer.renderRegionCrops(pageIndex, cloneForWindow([rect], scope));
+  const images = await withPDFOperationDeadline<any>("PDF.js 区域渲染", PDF_DEADLINES.render,
+    () => renderer.renderRegionCrops(pageIndex, cloneForWindow([rect], scope)));
   const png = images?.[0];
   return typeof png === "string" && png.startsWith("data:image/png;base64,") ? png : "";
 }
@@ -241,14 +254,15 @@ function pdfPageGeometry(page: any) {
 export async function getPDFPageLayout(reader: any, pageIndex: number) {
   const handle = getNormalPDFProxy(reader);
   if (!handle) throw new Error("无法读取原始 PDF 的页面坐标。");
-  return pdfPageGeometry(unwrapPDFObject(await handle.pdf.getPage(pageIndex + 1)));
+  return pdfPageGeometry(unwrapPDFObject(await withPDFOperationDeadline("PDF.js 页面坐标加载",
+    PDF_DEADLINES.page, () => handle.pdf.getPage(pageIndex + 1))));
 }
 
 export async function getOriginalPDFBytes(pdf: any): Promise<Uint8Array> {
   if (typeof pdf?.getData !== "function") {
     throw new Error("当前 PDF.js 文档未提供原始字节。Docling 无法处理此文件。");
   }
-  const data = await pdf.getData();
+  const data = await withPDFOperationDeadline<any>("PDF.js 原始文件读取", PDF_DEADLINES.fileRead, () => pdf.getData());
   if (!data || typeof data.length !== "number" || data.length < 4) {
     throw new Error("PDF.js 返回的原始文件为空。");
   }

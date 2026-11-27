@@ -4,6 +4,7 @@
  * prevent accidental key disclosure to arbitrary hosts.
  */
 import type { NativeDocument } from "./pdfNativeModel";
+import { PDF_DEADLINES, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
 import { CLOUD_NAMES, normalizeMinerU, normalizeMarkdownPages, type CloudParser } from "./pdfCloudModel";
 
 const PREF = "extensions.zotero.bilingualreader.native.cloud.";
@@ -91,7 +92,9 @@ async function readMinerUZip(buffer: ArrayBuffer): Promise<unknown> {
     const stream = c.classes["@mozilla.org/io/arraybuffer-input-stream;1"]
       .createInstance(c.interfaces.nsIArrayBufferInputStream);
     stream.setData(buffer, 0, buffer.byteLength);
-    await (Zotero.File as any).putContentsAsync(file.path, stream);
+    await writeTemporaryWithDeadline("MinerU ZIP 临时文件写入", PDF_DEADLINES.fileWrite,
+      () => (Zotero.File as any).putContentsAsync(file.path, stream),
+      () => { if (file.exists()) file.remove(false); });
     zip.open(file);
     opened = true;
     // Read only the bounded JSON entry, never unpack arbitrary archive paths.
