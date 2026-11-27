@@ -11,6 +11,8 @@ import re
 import shutil
 import subprocess
 import sys
+import stat
+import unicodedata
 import tarfile
 import tempfile
 import urllib.parse
@@ -111,6 +113,57 @@ def pack_candidate(output,archive,wheels,lock):
         z.write(HERE/"launcher.py","launcher.py")
         for wheel in sorted(wheels.glob("*.whl")):z.write(wheel,"wheels/"+wheel.name)
 
+def runtime_member(name):
+    parts=name.split("/")
+    if not parts or any(not p or p in (".","..") or p.endswith(("."," ")) or any(ord(c)<32 or c in '\\:<>"|?*' for c in p) or re.fullmatch(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?",p,re.I) for p in parts):
+        raise ValueError("Unsafe runtime member: "+name)
+    if not (name in ("launcher.py","requirements.lock") or parts[0] in ("python","site") and len(parts)>1):
+        raise ValueError("Unexpected runtime member")
+    return unicodedata.normalize("NFC",name).casefold()
+
+def pack_installable(root,output,target):
+    # Materialize only regular files. Internal file symlinks are copied as
+    # regular aliases; directory symlinks are deliberately refused.
+    rows=[];seen=set();total=0
+    files=[root/"launcher.py",root/"requirements.lock"]
+    for prefix in ("python","site"):
+        for directory,dirs,names in os.walk(root/prefix,followlinks=False):
+            for d in dirs:
+                if (Path(directory)/d).is_symlink():raise ValueError("Runtime directory symlink is unsupported")
+            for name in names:
+                path=Path(directory)/name
+                # PIP entrypoint scripts include a build-machine shebang. The
+                # launcher invokes the Python module; it does not need them.
+                rel=path.relative_to(root).as_posix()
+                if rel.startswith(("site/bin/","site/Scripts/")) or "__pycache__" in path.parts or path.suffix==".pyc":continue
+                files.append(path)
+    with zipfile.ZipFile(output,"x",compression=zipfile.ZIP_DEFLATED,compresslevel=3,allowZip64=True) as z:
+        for path in sorted(files):
+            name=path.relative_to(root).as_posix();key=runtime_member(name)
+            actual=path.resolve(strict=True)
+            if not actual.is_relative_to(root.resolve()) or not actual.is_file() or key in seen:raise ValueError("Unsafe or duplicate runtime file")
+            seen.add(key);size=actual.stat().st_size;total+=size
+            if len(seen)>100000 or size>512*1024**2 or total>4*1024**3:raise ValueError("Runtime size limit exceeded")
+            executable=bool(actual.stat().st_mode & stat.S_IXUSR)
+            rows.append({"path":name,"size":size,"sha256":sha256(actual),"executable":executable})
+            info=zipfile.ZipInfo(name);info.create_system=3;info.external_attr=((stat.S_IFREG|(0o700 if executable else 0o600))<<16);info.compress_type=zipfile.ZIP_DEFLATED
+            with actual.open("rb") as src,z.open(info,"w",force_zip64=True) as dst:shutil.copyfileobj(src,dst,1024*1024)
+        z.writestr("runtime-files.json",json.dumps({"schema":1,"target":target,"version":"0.7.1","files":rows},separators=(",",":")))
+    return {"name":output.name,"sha256":sha256(output),"size":output.stat().st_size,"unpackedSize":total,"fileCount":len(rows)}
+
+def unpack_installable(archive,dest,target):
+    with zipfile.ZipFile(archive) as z:
+        m=json.loads(z.read("runtime-files.json"));rows=m["files"]
+        if m["target"]!=target or m["version"]!="0.7.1" or m["schema"]!=1:raise ValueError("Runtime manifest mismatch")
+        names=[r["path"] for r in rows]
+        if len(names)!=len(set(map(runtime_member,names))) or len(z.namelist())!=len(names)+1 or set(z.namelist())!=set(names+["runtime-files.json"]):raise ValueError("Runtime file list mismatch")
+        for r in rows:
+            path=dest/r["path"];path.parent.mkdir(parents=True,exist_ok=True)
+            if z.getinfo(r["path"]).file_size!=r["size"]:raise ValueError("Runtime file size mismatch")
+            with z.open(r["path"]) as src,path.open("xb") as dst:shutil.copyfileobj(src,dst,1024*1024)
+            if sha256(path)!=r["sha256"]:raise ValueError("Runtime file digest mismatch")
+            path.chmod(0o700 if r["executable"] else 0o600)
+
 def build(args):
     target=host_target()
     if target not in PINS["targets"]:raise RuntimeError("Unsupported native build host: "+target)
@@ -145,6 +198,14 @@ def build(args):
         pip2=[py2,"-I","-X","utf8","-m","pip","--isolated","--disable-pip-version-check","--no-input"]
         run(pip2+["install","--no-index","--find-links",relocated/"wheels","--only-binary=:all:","--require-hashes","--no-deps","--no-compile","--target",relocated/"site","-r",relocated/"requirements.lock"],root/"second home")
         run([py2,"-I","-X","utf8",relocated/"launcher.py","--home",root/"probe home","probe"],root/"probe home")
+        installable=None
+        if args.installer_candidate:
+            flat=output/("babeldoc-0.7.1-"+target+"-runtime-candidate.zip")
+            installable=pack_installable(relocated,flat,target)
+            third=root/"installed runtime 测试";third.mkdir()
+            unpack_installable(flat,third,target)
+            run([py_path(third),"-I","-X","utf8",third/"launcher.py","--home",root/"third probe home","probe"],root/"third probe home")
+            installable["relocationProbe"]=True
         assets=None
         if args.assets:
             assetdir=output/"assets";assetdir.mkdir()
@@ -156,7 +217,7 @@ def build(args):
         manifest={"schema":1,"status":"candidate-not-approved-for-distribution","target":target,
                   "babeldoc":PINS["babeldoc"],"python":PINS["python"],"pythonSha256":pin["pythonSha256"],
                   "runtime":{"name":package.name,"sha256":sha256(package),"size":package.stat().st_size},
-                  "dependencyLockSha256":sha256(lock),"relocationProbe":True,
+                  "dependencyLockSha256":sha256(lock),"relocationProbe":True,"installerCandidate":installable,
                   "offlineAssets":None if not assets else {"name":assets.name,"sha256":sha256(assets),"size":assets.stat().st_size,"verified":True},
                   "releaseBlockers":["review and commit resolved dependency lock","dependency vulnerability and license review","model/font redistribution review","real PDF translation on target OS","installer validation"]}
         (reportdir/"manifest.json").write_text(json.dumps(manifest,indent=2),encoding="utf-8")
@@ -166,4 +227,5 @@ if __name__=="__main__":
     p.add_argument("--output",type=Path,required=True)
     p.add_argument("--target",choices=list(PINS["targets"]))
     p.add_argument("--assets",action="store_true")
+    p.add_argument("--installer-candidate",action="store_true")
     build(p.parse_args())

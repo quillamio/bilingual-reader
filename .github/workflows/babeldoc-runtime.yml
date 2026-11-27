@@ -38,7 +38,7 @@ jobs:
       - name: Verify builder safety
         run: python -m unittest discover -s scripts/babeldoc-runtime -p test_builder.py
       - name: Build and relocate official runtime candidate
-        run: python scripts/babeldoc-runtime/build.py --target ${{ matrix.target }} --output candidate-output ${{ matrix.assets }}
+        run: python scripts/babeldoc-runtime/build.py --target ${{ matrix.target }} --output candidate-output --installer-candidate ${{ matrix.assets }}
       - name: Upload only audit manifests and dependency locks
         if: always()
         uses: actions/upload-artifact@v4

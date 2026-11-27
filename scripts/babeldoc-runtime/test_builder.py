@@ -33,4 +33,17 @@ class BuilderTests(unittest.TestCase):
             with self.assertRaises(ValueError):build.lock_from_report(p,"macos-arm64")
     def test_audited_lock_drift_rejected(self):
         with self.assertRaises(ValueError):build.verify_lock("changed==1.0\n","macos-arm64")
+    def test_flat_archive_is_relocatable_and_verifies_members(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=pathlib.Path(d)/"source";root.mkdir()
+            for sub in ("python","site"):(root/sub).mkdir()
+            (root/"launcher.py").write_text("print('test')");(root/"requirements.lock").write_text("lock")
+            (root/"python"/"python.exe").write_bytes(b"exe");(root/"site"/"module.py").write_text("x=1")
+            archive=pathlib.Path(d)/"runtime.zip";meta=build.pack_installable(root,archive,"windows-x64")
+            dest=pathlib.Path(d)/"installed 测试";dest.mkdir()
+            build.unpack_installable(archive,dest,"windows-x64")
+            self.assertEqual((dest/"site"/"module.py").read_text(),"x=1")
+            self.assertEqual(meta["fileCount"],4)
+            with self.assertRaises(ValueError):build.runtime_member("site/../outside")
+            with self.assertRaises(ValueError):build.runtime_member("site/CON.txt")
 if __name__=="__main__":unittest.main()
