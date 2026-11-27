@@ -290,7 +290,7 @@ export async function parseWithCloudProvider(provider: CloudParser, bytes: Uint8
               if(size>PADDLE_RESULT_LIMIT)throw new Error("PaddleOCR 结果超过容量上限。");
               parts.push(decoder.decode(chunk.value,{stream:true}));
             }
-            parts.push(decoder.decode());verify();return parts.join("");
+            parts.push(decoder.decode(new Uint8Array(0)));verify();return parts.join("");
           }finally{reader.releaseLock();}
         }catch(error){
           verify();
