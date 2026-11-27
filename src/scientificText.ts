@@ -1,6 +1,6 @@
 /** Conservative scientific-token preservation for English-to-Chinese translation. */
 export type ScientificSpan = { start: number; end: number; text: string };
-const TERMS = "FBN1|NOTCH2NLC|SMCHD1|DNMT3B|DUX4|DYSF|TP53|BRCA1|BRCA2|APOE|EGFR|KRAS|BRAF|PTEN|ACTB|GAPDH|SFTPC|AGER|CHRNA7|IL-6|TNF-α|NF-κB|C5b-9|mTOR|p53|iPSC|iPSCs|sgRNA|mRNA|miRNA|RNA|DNA|cDNA|PCR|qPCR|RT-PCR|CRISPR|Cas9|AAV9|NSAD|6MWT|10MRT|MMT|MRI|CT|ROC|AUC|HR|aHR|OR|RR|CI|SD|IQR|BMI|LDL-C|HDL-C|HbA1c|CRP|hs-CRP|eGFR|XunZi|FSHD|NIID|DMD|COPD|CVD|MFS|NIID-iPSC|ECU|ELISA|CHARLS|RCII|CoxPH|TGF-β|IFN-γ|IL-1β|CD4|CD8|CD20|ATP|NADH|IgG|IgM|IgA|SNP|GWAS|RNA-seq";
+const TERMS = "FBN1|NOTCH2NLC|SMCHD1|DNMT3B|DUX4|DYSF|TP53|BRCA1|BRCA2|APOE|EGFR|KRAS|BRAF|PTEN|ACTB|GAPDH|SFTPC|AGER|CHRNA7|IL-6|TNF-α|NF-κB|C5b-9|mTOR|p53|iPSC|iPSCs|sgRNA|mRNA|miRNA|RNA|DNA|cDNA|PCR|qPCR|RT-PCR|CRISPR|Cas9|AAV9|NSAD|6MWT|10MRT|MMT|MRI|CT|ROC|AUC|HR|aHR|OR|RR|CI|SD|IQR|BMI|LDL-C|HDL-C|HbA1c|CRP|hs-CRP|eGFR|XunZi|FSHD|NIID|DMD|COPD|CVD|MFS|NIID-iPSC|ECU|ELISA|CHARLS|RCII|CoxPH|TGF-β|IFN-γ|IL-1β|CD4|CD8|CD20|ATP|NADH|IgG|IgM|IgA|SNP|GWAS|RNA-seq|CHK2|Chk2|IRAK4|Irak4|NSCLC|MACE|MI|PD|remnant-C|HRs|aHRs";
 const NUMBER = "[+−-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?(?:[eE][+−-]?\\d+)?|[+−-]?\\.\\d+";
 const UNIT = "(?:%|‰|°C|°F|mmHg|mg/dL|g/dL|mmol/L|μmol/L|µmol/L|ng/mL|pg/mL|mg/kg|mL/min|kg/m²|kg/m2|mg|μg|µg|ng|pg|kg|mL|μL|µL|mm|cm|μm|µm|nm|km|ms|Hz|kDa|bp|kb|Mb|mM|μM|µM|nM|pM|s|m|h|L|g)";
 const EDGE_LEFT = "(?<![A-Za-z0-9_])";
@@ -13,6 +13,8 @@ const PATTERNS = [
   /\([A-Z][A-Za-z'-]+(?:\s+et\s+al\.|\s*&\s*[A-Z][A-Za-z'-]+),?\s+\d{4}[a-z]?\)/gu,
   /(?<![A-Za-z0-9_])(?:[cgnmpr]\.\d+(?:[+−-]\d+)?[ACGT]>[ACGT]|p\.[A-Z][a-z]{2}\d+[A-Z][a-z]{2}|rs\d+|HLA-[A-Z]+\*\d+(?::\d+)+)(?![A-Za-z0-9_])/gu,
   new RegExp(EDGE_LEFT + "(?:(?:[PpNn]|HR|aHR|OR|RR|[rR]²|[rR]2|[rR]|[α-ωΑ-Ω])\\s*(?:<=|>=|[=<>≤≥≈])\\s*(?:" + NUMBER + "))" + EDGE_RIGHT, "gu"),
+  // Comparators before bare numbers; preserve the direction of clinical thresholds.
+  new RegExp("(?:<=|>=|[<>≤≥＝＜＞])\\s*(?:" + NUMBER + ")(?:\\s?" + UNIT + ")?" + EDGE_RIGHT, "gu"),
   new RegExp(EDGE_LEFT + "(?:" + TERMS + ")" + EDGE_RIGHT, "gu"),
   /(?<![A-Za-z0-9_])[A-Z][A-Z0-9-]{1,11}\d[A-Z0-9-]*(?![A-Za-z0-9_])/gu,
   new RegExp(EDGE_LEFT + "(?:" + NUMBER + ")(?:\\s*[-–−]\\s*(?:" + NUMBER + "))?(?:\\s?" + UNIT + ")?(?![A-Za-z0-9_]|\\.\\d)", "gu"),
@@ -50,7 +52,7 @@ export function isScientificPreserveOnly(text: string): boolean {
   // Do not classify normal headings, drug names or prose as protected identifiers.
   return !/\p{L}/u.test(residual) && (/\d|[α-ωΑ-Ω]|[=+−×÷∑∫√]/u.test(value) || scientificSpans(value).length > 0);
 }
-function comparable(text: string): string { return text.normalize("NFC").replace(/\s+/gu, "").replace(/−/gu, "-").replace(/µ/gu, "μ"); }
+function comparable(text: string): string { return text.normalize("NFC").replace(/\s+/gu, "").replace(/−/gu, "-").replace(/(?<=\d)–(?=[+-]?\d)/gu, "-").replace(/[＜]/gu, "<").replace(/[＞]/gu, ">").replace(/[≤]/gu, "<=").replace(/[≥]/gu, ">=").replace(/µ/gu, "μ"); }
 export type TranslationQuality = "valid" | "preserved" | "service-error" | "untranslated" | "missing-scientific-token" | "unresolved-marker";
 export function translationQuality(source: string, result: string): TranslationQuality {
   const value = result.trim();

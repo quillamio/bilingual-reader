@@ -5,8 +5,8 @@
  * guaranteed to survive a new combined PDF; the source attachment is untouched.
  */
 import type { PDFDocument, PDFPage } from "pdf-lib";
-import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline } from "./pdfOperationDeadline";
-import type { PDFExportTask } from "./pdfExportTask";
+import { PDF_DEADLINES, PDFOperationTimeoutError, withPDFOperationDeadline, writeTemporaryWithDeadline } from "./pdfOperationDeadline.ts";
+import type { PDFExportTask } from "./pdfExportTask.ts";
 
 export async function readPDFFile(file: any, maxBytes = 250 * 1024 * 1024, task?: PDFExportTask): Promise<Uint8Array> {
   task?.throwIfCancelled();
