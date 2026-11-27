@@ -8,6 +8,8 @@ import { PDF_DEADLINES, writeTemporaryWithDeadline, waitForPDFExport } from "./p
 import { PDFExportCancelledError, type PDFExportTask } from "./pdfExportTask";
 import { CLOUD_NAMES, normalizeMinerU, normalizeMarkdownPages, type CloudParser } from "./pdfCloudModel";
 
+import { parseDoc2X, parseMathpix, type ParseRequest } from "./externalPDFClient";
+
 const PREF = "extensions.zotero.bilingualreader.native.cloud.";
 const MAX_BYTES = 30 * 1024 * 1024;
 export function getCloudKey(provider: CloudParser): string {
@@ -18,7 +20,7 @@ export function setCloudKey(provider: CloudParser, key: string): void {
   (Zotero.Prefs as any).set(PREF + provider + ".key", key.trim(), true);
 }
 export function getCloudModel(provider: CloudParser): string {
-  const defaults = { mineru: "vlm", mistral: "mistral-ocr-latest", llamaparse: "agentic" };
+  const defaults = { mineru: "vlm", mistral: "mistral-ocr-latest", llamaparse: "agentic", doc2x: "v3-2026", mathpix: "" };
   const value = (Zotero.Prefs as any).get(PREF + provider + ".model", true);
   return typeof value === "string" && value.trim() ? value.trim() : defaults[provider];
 }
@@ -264,5 +266,26 @@ export async function parseWithCloudProvider(provider: CloudParser, bytes: Uint8
     case "mineru": return mineru(bytes, key, model, base, check, task);
     case "mistral": return mistral(bytes, key, model, base);
     case "llamaparse": return llamaparse(bytes, key, model, base, check, task);
+    case "doc2x": case "mathpix": {
+      const verify = () => { task?.throwIfCancelled(); cancelled(check); };
+      const transport:ParseRequest = async (method,url,headers,body) => {
+        verify();
+        if(method==="PUT") {
+          const win=Zotero.getMainWindow(),abort=new win.AbortController();
+          const off=task?.onCancel(()=>abort.abort()),timer=setTimeout(()=>abort.abort(),180000);
+          try {
+            const response=await win.fetch(url,{method,body:body as ArrayBuffer,credentials:"omit",redirect:"error",signal:abort.signal,cache:"no-store"});
+            if(!response.ok)throw new Error("上传失败");
+            return undefined;
+          } catch (_) {verify();throw new Error("PDF 签名上传失败；请检查服务历史。");}
+          finally {off?.();clearTimeout(timer);}
+        }
+        const result=await request(method,url,typeof body==="string"?binary(encode(body)):body,headers);
+        verify();return result;
+      };
+      const control={check:verify,wait:(ms:number)=>waitForPDFExport(ms,task)};
+      const rows=provider==="doc2x"?await parseDoc2X(transport,bytes,key,model,control):await parseMathpix(transport,bytes,model,key,control);
+      return normalizeMarkdownPages(base,provider,rows);
+    }
   }
 }

@@ -55,7 +55,7 @@ import { isCloudParser } from "../pdfCloudModel";
 import { checkMinerUConnection, getCloudKey, getCloudModel, setCloudKey, setCloudModel } from "../pdfCloudParsers";
 
 
-const CLOUD_PROVIDERS = ["mineru", "mistral", "llamaparse"] as const;
+const CLOUD_PROVIDERS = ["mineru", "mistral", "llamaparse", "doc2x", "mathpix"] as const;
 
 const PROJECT_URL = "https://github.com/quillamio/bilingual-reader";
 

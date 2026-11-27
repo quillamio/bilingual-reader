@@ -114,6 +114,8 @@ async function gptTranslate(text: string, id: string): Promise<string> {
   const isGLM = id === "glm47flash";
   const url = isGLM
     ? "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    : id === "siliconflow" ? "https://api.siliconflow.cn/v1/chat/completions"
+    : id === "openrouter" ? "https://openrouter.ai/api/v1/chat/completions"
     : setting(id, "endpoint");
   const isAzure = id === "azuregpt";
   const isResponses = /\/responses(?:\?|$)/.test(url);
@@ -237,7 +239,12 @@ async function translateSingle(text: string, id: string): Promise<string> {
       return ensureText(res?.[0]?.translations?.[0]?.text, "Microsoft Translator");
     }
     case "openai": case "customgpt1": case "customgpt2": case "customgpt3":
-    case "azuregpt": case "glm47flash": return gptTranslate(text, id);
+    case "azuregpt": case "glm47flash": case "siliconflow": case "openrouter": return gptTranslate(text, id);
+    case "googlecloud": {
+      const response = await post("https://translation.googleapis.com/language/translate/v2",
+        { q: text, source: "en", target: "zh-CN", format: "text" }, { "X-Goog-Api-Key": secret });
+      return ensureText(response?.data?.translations?.[0]?.translatedText, "Google Cloud Translation");
+    }
     case "gemini": {
       const url = setting(id, "endpoint").replace(/:(streamGenerateContent|generateContent).*$/, ":generateContent");
       const addQuery = url.includes("?") ? "&" : "?";

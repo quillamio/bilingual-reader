@@ -1,10 +1,10 @@
 import type { NativeBlock, NativeDocument, NativePage, NativeParser, NativeBlockType } from "./pdfNativeModel";
 
-export type CloudParser = Extract<NativeParser, "mineru" | "mistral" | "llamaparse">;
+export type CloudParser = Extract<NativeParser, "mineru" | "mistral" | "llamaparse" | "doc2x" | "mathpix">;
 export function isCloudParser(value: unknown): value is CloudParser {
-  return value === "mineru" || value === "mistral" || value === "llamaparse";
+  return value === "mineru" || value === "mistral" || value === "llamaparse" || value === "doc2x" || value === "mathpix";
 }
-export const CLOUD_NAMES = { mineru: "MinerU", mistral: "Mistral OCR", llamaparse: "LlamaParse" };
+export const CLOUD_NAMES = { mineru: "MinerU", mistral: "Mistral OCR", llamaparse: "LlamaParse", doc2x: "Doc2X", mathpix: "Mathpix" };
 
 function pageBlock(page: NativePage, source: CloudParser, text: string,
   type: NativeBlockType, order: number): NativeBlock {
@@ -48,13 +48,13 @@ export function mergeCloudPages(base: NativeDocument, source: CloudParser,
   return { source, pages: output, warnings };
 }
 export function normalizeMarkdownPages(base: NativeDocument,
-  source: "mistral" | "llamaparse", rows: unknown): NativeDocument {
+  source: "mistral" | "llamaparse" | "doc2x" | "mathpix", rows: unknown): NativeDocument {
   if (!Array.isArray(rows) || rows.length > base.pages.length) {
     throw new Error("云端返回的页数异常。");
   }
   const map = new Map<number, NativeBlock[]>();
   for (const row of rows) {
-    const index = source === "mistral" ? row?.index : row?.page_number - 1;
+    const index = source === "llamaparse" ? row?.page_number - 1 : row?.index;
     if (!Number.isInteger(index) || index < 0 || index >= base.pages.length || map.has(index)) {
       throw new Error("云端页码无效或重复。");
     }
