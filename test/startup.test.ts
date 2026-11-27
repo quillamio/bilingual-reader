@@ -1,4 +1,6 @@
 import { assert } from "chai";
+import { runtimeFileSHA256, unpackRuntimeArchive } from "../src/babeldocRuntimeZotero";
+import type { RuntimeRelease } from "../src/babeldocRuntimeManager";
 import { config } from "../package.json";
 import { refreshBilingualReading, toggleBilingualReading } from "../src/bilingualReader";
 import {
@@ -34,6 +36,45 @@ describe("startup", function () {
     assert.isNotEmpty(Zotero[config.addonInstance]);
   });
 
+  it("managed runtime verifies real Gecko ZIP extraction without executing code", async function () {
+    this.timeout(20000);
+    const c=(globalThis as any).Components;
+    const temp=Zotero.getTempDirectory();temp.append("br-runtime-fixture");temp.createUnique(1,0o700);
+    const child=(folder:any,name:string)=>{const file=folder.clone();file.append(name);return file;};
+    try{
+      const source=child(temp,"source.txt");
+      await (Zotero.File as any).putContentsAsync(source.path,"abc");
+      const sha="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+      assert.equal(runtimeFileSHA256(source),sha);
+      const files=[
+        {path:"python/bin/python3.12",size:3,sha256:sha,executable:true},
+        {path:"launcher.py",size:3,sha256:sha,executable:false},
+        {path:"requirements.lock",size:3,sha256:sha,executable:false},
+      ];
+      const manifest=child(temp,"manifest.json");
+      await (Zotero.File as any).putContentsAsync(manifest.path,JSON.stringify({schema:1,version:"0.7.1",target:"macos-arm64",files}));
+      const archive=child(temp,"runtime.zip");
+      const writer=c.classes["@mozilla.org/zipwriter;1"].createInstance(c.interfaces.nsIZipWriter);
+      writer.open(archive,0x04|0x08|0x20);
+      try{
+        writer.addEntryFile("runtime-files.json",0,manifest,false);
+        for(const member of files)writer.addEntryFile(member.path,0,source,false);
+      }finally{writer.close();}
+      const assets=child(temp,"assets.zip");
+      await (Zotero.File as any).putContentsAsync(assets.path,"abc");
+      const release:RuntimeRelease={version:"0.7.1-r1",target:"macos-arm64",
+        runtime:{size:Number(archive.fileSize),sha256:runtimeFileSHA256(archive)},assets:{size:3,sha256:sha},
+        unpackedSize:9,fileCount:3,manifestSha256:runtimeFileSHA256(manifest)};
+      let rejected=false;
+      try{await unpackRuntimeArchive(temp,{...release,runtime:{...release.runtime,sha256:"0".repeat(64)}},{check(){},progress(){}});}catch(_){rejected=true;}
+      assert.isTrue(rejected);assert.isFalse(child(temp,"payload").exists());
+      await unpackRuntimeArchive(temp,release,{check(){},progress(){}});
+      const payload=child(temp,"payload"),exe=child(child(child(payload,"python"),"bin"),"python3.12");
+      assert.equal(runtimeFileSHA256(exe),sha);
+      assert.equal(runtimeFileSHA256(child(payload,"offline-assets.zip")),sha);
+      assert.isTrue(child(payload,"installed.json").exists());
+    }finally{if(temp.exists())temp.remove(true);}
+  });
   it("should register the preferences pane", function () {
     const pane = Zotero.PreferencePanes.pluginPanes.find(
       (entry) => entry.id === "bilingual-reader-preferences",
@@ -58,6 +99,8 @@ describe("startup", function () {
       }
 
       assert.exists(win?.document.getElementById("bilingualreader-engine"));
+      assert.isTrue((win?.document.getElementById("bilingualreader-runtime-install") as HTMLButtonElement).disabled);
+      assert.exists(win?.document.getElementById("bilingualreader-runtime-versions"));
       const engine = win?.document.getElementById(
         "bilingualreader-engine",
       ) as HTMLSelectElement | null;

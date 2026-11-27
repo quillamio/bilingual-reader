@@ -50,7 +50,7 @@ function stream(file:any):any{
   const input=c.classes["@mozilla.org/network/file-input-stream;1"].createInstance(c.interfaces.nsIFileInputStream);
   input.init(file,0x01,0,0);return input;
 }
-function fileDigest(file:any):string{
+export function runtimeFileSHA256(file:any):string{
   const c=components(),input=stream(file);
   try{
     const hash=c.classes["@mozilla.org/security/hash;1"].createInstance(c.interfaces.nsICryptoHash);
@@ -59,7 +59,7 @@ function fileDigest(file:any):string{
   }finally{input.close();}
 }
 function verifyFile(file:any,size:number,sha:string):void{
-  regular(file);if(Number(file.fileSize)!==size||fileDigest(file)!==sha)throw new Error("运行包 SHA-256 或大小校验失败。");
+  regular(file);if(Number(file.fileSize)!==size||runtimeFileSHA256(file)!==sha)throw new Error("运行包 SHA-256 或大小校验失败。");
 }
 function readJSON(file:any,max=24*1024**2):any{
   regular(file);if(Number(file.fileSize)>max)throw new Error("运行包清单超过容量限制。");
@@ -130,7 +130,7 @@ function listFiles(base:any,prefix="",out:string[]=[]):string[]{
   }
   return out;
 }
-async function unpack(stage:any,release:RuntimeRelease,control:RuntimeControl):Promise<void>{
+export async function unpackRuntimeArchive(stage:any,release:RuntimeRelease,control:RuntimeControl):Promise<void>{
   const archive=child(stage,"runtime.zip"),assets=child(stage,"assets.zip");
   verifyFile(archive,release.runtime.size,release.runtime.sha256);
   verifyFile(assets,release.assets.size,release.assets.sha256);
@@ -162,7 +162,7 @@ async function unpack(stage:any,release:RuntimeRelease,control:RuntimeControl):P
 async function verifyInstalled(id:string,release:RuntimeRelease,control:RuntimeControl):Promise<void>{
   const folder=slot(id);if(!folder.exists()||folder.isSymlink()||!folder.isDirectory())throw new Error("已安装运行包缺失。");
   const manifestFile=child(folder,"runtime-files.json");regular(manifestFile);
-  if(fileDigest(manifestFile)!==release.manifestSha256)throw new Error("已安装运行包清单已修改。");
+  if(runtimeFileSHA256(manifestFile)!==release.manifestSha256)throw new Error("已安装运行包清单已修改。");
   const manifest=readJSON(manifestFile);
   const paths=listFiles(folder).sort();
   const expected=[...(Array.isArray(manifest?.files)?manifest.files.map((m:any)=>m.path):[]),"runtime-files.json","offline-assets.zip","installed.json"].sort();
@@ -193,7 +193,7 @@ const storage:RuntimeStorage={
     file.createUnique(1,0o700);return file.leafName;
   },
   download:async(stage,kind,url,asset,control)=>download(child(dir(stagePath(stage)),kind+".zip"),url,asset,control),
-  verifyAndExtract:async(stage,release,control)=>unpack(dir(stagePath(stage)),release,control),
+  verifyAndExtract:async(stage,release,control)=>unpackRuntimeArchive(dir(stagePath(stage)),release,control),
   commit:async(stage,id,release)=>{
     if(id!==runtimeID(release)||slot(id).exists())throw new Error("运行包目标目录已存在。");
     const path=dir(stagePath(stage));dir(child(path,"payload")).moveTo(root(),id);
