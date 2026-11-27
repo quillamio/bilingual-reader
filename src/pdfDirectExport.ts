@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import { subsetFont } from "./vendor/notofu/subset.ts";
 import { prepareInPlacePage, type PageLayout, type PositionedPDFPage } from "./pdfInPlaceLayout";
 import { wrapPDFText, requirePDFGlyphs } from "./pdfDirectText";
 import { withPDFOperationDeadline } from "./pdfOperationDeadline";
@@ -52,10 +53,16 @@ export async function buildDirectRightPage(
   original?: { png: string; geometry: PageLayout }, task?: PDFExportTask,
 ): Promise<DirectRightPage> {
   const fontBytes = await loadBundledFont(task);
+  // Pre-subset with a valid standalone TrueType font. The old fontkit
+  // subsetter corrupts CJK glyph data in real rendered PDFs.
+  const label = "译文续页 · 原始第 " + (pageIndex + 1) + " 页";
+  const text = (paragraphs.map(p => p.text).join(" ") + " " + label).replace(/\s/gu," ");
+  const subset = subsetFont(fontBytes, { text, familyName: "BilingualReaderCJK" });
+  if (subset.missingCodepoints.length) throw new Error("Direct PDF font does not cover every character");
   const makeDoc = async () => {
     const pdf = await PDFDocument.create();
     pdf.registerFontkit(fontkit);
-    const font = await pdf.embedFont(fontBytes, { subset: true });
+    const font = await pdf.embedFont(subset.font, { subset: false });
     return { pdf, font };
   };
   let bytes: Uint8Array | undefined;
@@ -90,7 +97,6 @@ export async function buildDirectRightPage(
     const { pdf, font } = await makeDoc();
     const chars = new Set(font.getCharacterSet());
     const width = 595.28, height = 841.89, margin = 48;
-    const label = "译文续页 · 原始第 " + (pageIndex + 1) + " 页";
     requirePDFGlyphs(label, chars);
     let page = pdf.addPage([width, height]);
     let y = height - margin;

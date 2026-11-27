@@ -1,0 +1,460 @@
+// MIT: Ax1zz/notofu @ 123ebf7d53b194f16c477e73a50a67bea0b5c0fc; local import extension adaptation.
+/**
+ * The glyph subsetter.
+ *
+ * Given a TrueType font and the text you actually want to render, produces a
+ * new, valid TrueType font containing only the glyphs required. This is what
+ * turns a 17 MB CJK font into a few kilobytes.
+ */
+
+import { Writer, FontFormatError, copyOf } from './sfnt/binary.ts';
+import { SfntFont, buildSfnt } from './sfnt/font.ts';
+import { readCmap, buildCmap } from './sfnt/cmap.ts';
+import { closeOverComponents, remapComponents } from './sfnt/glyf.ts';
+
+export interface SubsetOptions {
+  /** Characters to keep. Combined with `codepoints` and `glyphIds`. */
+  text?: string;
+  /** Explicit codepoints to keep, in addition to those in `text`. */
+  codepoints?: Iterable<number>;
+  /** Explicit glyph ids to keep (advanced; bypasses cmap lookup). */
+  glyphIds?: Iterable<number>;
+  /**
+   * Preserve original glyph numbering instead of compacting it.
+   *
+   * Produces a larger `loca` table but keeps glyph ids stable, which some
+   * pipelines that pre-computed glyph indices depend on. Default `false`.
+   */
+  keepGlyphIds?: boolean;
+  /** Keep hinting tables (`cvt `, `fpgm`, `prep`, `gasp`). Default `true`. */
+  keepHinting?: boolean;
+  /** Keep vertical metrics (`vhea`, `vmtx`) for vertical CJK layout. Default `false`. */
+  keepVertical?: boolean;
+  /** Override the family name written into the output font's `name` table. */
+  familyName?: string;
+  /**
+   * Include the standard "always useful" codepoints (space, digits, basic
+   * punctuation) even if absent from `text`. Default `true` — it costs very
+   * little and avoids surprise tofu from a stray space.
+   */
+  includeBasicLatin?: boolean;
+}
+
+export interface SubsetResult {
+  /** The subsetted font, ready to write to disk or embed in a PDF. */
+  font: Uint8Array;
+  originalSize: number;
+  subsetSize: number;
+  originalGlyphCount: number;
+  glyphCount: number;
+  /** Requested codepoints the source font could actually render. */
+  mappedCodepoints: number[];
+  /**
+   * Requested codepoints with no glyph in this font. Rendering these will
+   * produce tofu; pick a font with wider coverage or supply a fallback.
+   */
+  missingCodepoints: number[];
+  /** Old glyph id -> new glyph id. */
+  glyphMap: Map<number, number>;
+  /**
+   * Non-fatal problems worth surfacing to the user — most importantly, when
+   * a variable font's default instance is not the weight they probably want.
+   */
+  warnings: string[];
+}
+
+/** Space, digits and ASCII punctuation — cheap insurance against stray tofu. */
+const BASIC_LATIN: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let c = 0x20; c <= 0x7e; c++) out.add(c);
+  return out;
+})();
+
+interface RequestedChars {
+  /** Everything to keep, including the implicit Basic Latin block. */
+  all: Set<number>;
+  /**
+   * Only what the caller asked for explicitly.
+   *
+   * Materialised once, because `codepoints` is an `Iterable` and may be a
+   * generator — re-iterating a spent generator silently yields nothing.
+   */
+  explicit: Set<number>;
+}
+
+function collectCodepoints(opts: SubsetOptions): RequestedChars {
+  const cps = new Set<number>();
+  const explicit = new Set<number>();
+  if (opts.text) {
+    // Iterating a string yields whole code points, so astral characters
+    // (most CJK Extension B, emoji) are handled correctly rather than as
+    // broken surrogate halves.
+    for (const ch of opts.text) {
+      const cp = ch.codePointAt(0);
+      if (cp !== undefined) {
+        cps.add(cp);
+        explicit.add(cp);
+      }
+    }
+  }
+  if (opts.codepoints) {
+    for (const cp of opts.codepoints) {
+      if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) {
+        throw new RangeError(`invalid codepoint: ${cp}`);
+      }
+      cps.add(cp);
+      explicit.add(cp);
+    }
+  }
+  if (opts.includeBasicLatin !== false) {
+    for (const cp of BASIC_LATIN) cps.add(cp);
+  }
+  return { all: cps, explicit };
+}
+
+function buildPostV3(): Uint8Array {
+  // Version 3.0 declares "no glyph names here", which is legal and saves a
+  // lot of bytes versus version 2.0's name array.
+  const w = new Writer(32);
+  w.u32(0x00030000);
+  w.u32(0); // italicAngle
+  w.i16(0); // underlinePosition
+  w.i16(0); // underlineThickness
+  w.u32(0); // isFixedPitch
+  w.u32(0); // minMemType42
+  w.u32(0); // maxMemType42
+  w.u32(0); // minMemType1
+  w.u32(0); // maxMemType1
+  return w.finish();
+}
+
+function asciiSafe(s: string, fallback: string): string {
+  const cleaned = [...s].filter((c) => c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) <= 0x7e).join('');
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function buildName(family: string, subfamily: string): Uint8Array {
+  const psName = asciiSafe(family.replace(/[\s()[\]{}<>/%]/g, ''), 'NotofuSubset').slice(0, 63);
+  const full = `${family} ${subfamily}`.trim();
+  const strings: Array<{ id: number; value: string }> = [
+    { id: 0, value: 'Subset generated by notofu. Original font licence still applies.' },
+    { id: 1, value: family },
+    { id: 2, value: subfamily },
+    { id: 3, value: `notofu:${psName}` },
+    { id: 4, value: full },
+    { id: 5, value: 'Version 1.000' },
+    { id: 6, value: psName },
+  ];
+
+  // (1,0,0) Macintosh Roman and (3,1,0x409) Windows Unicode BMP.
+  const records: Array<{ platformID: number; encodingID: number; languageID: number; nameID: number; bytes: Uint8Array }> = [];
+  for (const s of strings) {
+    const mac = new Uint8Array(asciiSafe(s.value, '?').length);
+    const macStr = asciiSafe(s.value, '?');
+    for (let i = 0; i < macStr.length; i++) mac[i] = macStr.charCodeAt(i) & 0xff;
+    records.push({ platformID: 1, encodingID: 0, languageID: 0, nameID: s.id, bytes: mac });
+
+    const utf16 = new Uint8Array(s.value.length * 2);
+    for (let i = 0; i < s.value.length; i++) {
+      const c = s.value.charCodeAt(i);
+      utf16[i * 2] = (c >> 8) & 0xff;
+      utf16[i * 2 + 1] = c & 0xff;
+    }
+    records.push({ platformID: 3, encodingID: 1, languageID: 0x409, nameID: s.id, bytes: utf16 });
+  }
+  records.sort(
+    (a, b) =>
+      a.platformID - b.platformID ||
+      a.encodingID - b.encodingID ||
+      a.languageID - b.languageID ||
+      a.nameID - b.nameID,
+  );
+
+  const storage = new Writer(512);
+  const offsets: number[] = [];
+  for (const rec of records) {
+    offsets.push(storage.length);
+    storage.raw(rec.bytes);
+  }
+  const storageBytes = storage.finish();
+
+  const w = new Writer(6 + records.length * 12 + storageBytes.length);
+  w.u16(0); // format
+  w.u16(records.length);
+  w.u16(6 + records.length * 12); // stringOffset
+  records.forEach((rec, i) => {
+    w.u16(rec.platformID);
+    w.u16(rec.encodingID);
+    w.u16(rec.languageID);
+    w.u16(rec.nameID);
+    w.u16(rec.bytes.length);
+    w.u16(offsets[i]!);
+  });
+  w.raw(storageBytes);
+  return w.finish();
+}
+
+/**
+ * Subsets a TrueType font down to the glyphs needed for the requested text.
+ *
+ * @throws {FontFormatError} if the input is not a `glyf`-flavoured TrueType font.
+ */
+export function subsetFont(input: Uint8Array | ArrayBuffer, opts: SubsetOptions = {}): SubsetResult {
+  const source = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const font = SfntFont.parse(source);
+
+  if (!font.has('glyf') || !font.has('loca')) {
+    throw new FontFormatError(
+      'font has no `glyf`/`loca` tables — notofu subsets TrueType outlines only. ' +
+        'CFF/OpenType-PS fonts are not supported yet.',
+    );
+  }
+
+  const { all: requested, explicit } = collectCodepoints(opts);
+  const cmapTable = font.table('cmap');
+  const charToGid = cmapTable ? readCmap(cmapTable) : new Map<number, number>();
+
+  const mapped: number[] = [];
+  const missing: number[] = [];
+  const seedGlyphs = new Set<number>([0]); // .notdef must stay at index 0
+  const keptMapping = new Map<number, number>(); // codepoint -> old gid
+
+  for (const cp of [...requested].sort((a, b) => a - b)) {
+    const gid = charToGid.get(cp);
+    if (gid === undefined || gid === 0 || gid >= font.numGlyphs) {
+      // Basic Latin was added implicitly; do not report it as "missing"
+      // for a CJK-only font, that would just be noise.
+      const impliedLatinOnly =
+        opts.includeBasicLatin !== false && BASIC_LATIN.has(cp) && !explicit.has(cp);
+      if (!impliedLatinOnly) missing.push(cp);
+      continue;
+    }
+    mapped.push(cp);
+    keptMapping.set(cp, gid);
+    seedGlyphs.add(gid);
+  }
+
+  if (opts.glyphIds) {
+    const explicitGids = new Set<number>();
+    for (const g of opts.glyphIds) {
+      if (Number.isInteger(g) && g >= 0 && g < font.numGlyphs) {
+        seedGlyphs.add(g);
+        explicitGids.add(g);
+      }
+    }
+    // Give those glyphs cmap entries too, otherwise a subset built purely
+    // from glyph ids would have an empty cmap and be rejected below.
+    if (explicitGids.size > 0) {
+      for (const [cp, gid] of charToGid) {
+        if (explicitGids.has(gid) && !keptMapping.has(cp)) keptMapping.set(cp, gid);
+      }
+    }
+  }
+
+  const loca = font.loca;
+  const glyf = font.requireTable('glyf');
+  const getGlyph = (gid: number): Uint8Array => {
+    const start = loca[gid];
+    const end = loca[gid + 1];
+    if (start === undefined || end === undefined || end < start || end > glyf.length) {
+      return new Uint8Array(0);
+    }
+    return glyf.subarray(start, end);
+  };
+
+  const needed = closeOverComponents(seedGlyphs, getGlyph, font.numGlyphs);
+
+  // Build the old -> new glyph id map.
+  const oldGids = opts.keepGlyphIds
+    ? Array.from({ length: font.numGlyphs }, (_, i) => i)
+    : [...needed].sort((a, b) => a - b);
+  const glyphMap = new Map<number, number>();
+  oldGids.forEach((oldGid, newGid) => glyphMap.set(oldGid, newGid));
+  const newNumGlyphs = oldGids.length;
+  if (newNumGlyphs > 0xffff) {
+    throw new FontFormatError(`subset would contain ${newNumGlyphs} glyphs; the format limit is 65535`);
+  }
+
+  // --- glyf + loca -------------------------------------------------------
+  const glyphData: Uint8Array[] = [];
+  const newLoca = new Array<number>(newNumGlyphs + 1);
+  let cursor = 0;
+  for (let i = 0; i < newNumGlyphs; i++) {
+    newLoca[i] = cursor;
+    const oldGid = oldGids[i]!;
+    let g = needed.has(oldGid) || opts.keepGlyphIds ? getGlyph(oldGid) : new Uint8Array(0);
+    if (g.length > 0) {
+      g = remapComponents(g, glyphMap);
+      // Glyph records are conventionally padded to a 2-byte boundary.
+      if (g.length % 2 !== 0) {
+        const padded = new Uint8Array(g.length + 1);
+        padded.set(g);
+        g = padded;
+      }
+    }
+    glyphData.push(g);
+    cursor += g.length;
+  }
+  newLoca[newNumGlyphs] = cursor;
+
+  const glyfOut = new Uint8Array(cursor);
+  {
+    let at = 0;
+    for (const g of glyphData) {
+      glyfOut.set(g, at);
+      at += g.length;
+    }
+  }
+
+  // Always emit long-format loca: simpler, and correct for any table size.
+  const locaW = new Writer((newNumGlyphs + 1) * 4);
+  for (const off of newLoca) locaW.u32(off);
+  const locaOut = locaW.finish();
+
+  // --- hmtx + hhea -------------------------------------------------------
+  const metrics = font.horizontalMetrics();
+  const hmtxW = new Writer(newNumGlyphs * 4);
+  for (const oldGid of oldGids) {
+    const m = metrics[oldGid] ?? { advanceWidth: 0, lsb: 0 };
+    hmtxW.u16(Math.max(0, Math.min(0xffff, m.advanceWidth)));
+    hmtxW.i16(m.lsb);
+  }
+  const hmtxOut = hmtxW.finish();
+
+  const hheaSrc = font.requireTable('hhea');
+  const hheaOut = copyOf(hheaSrc);
+  if (hheaOut.length >= 36) {
+    hheaOut[34] = (newNumGlyphs >> 8) & 0xff;
+    hheaOut[35] = newNumGlyphs & 0xff;
+  }
+
+  // --- maxp / head -------------------------------------------------------
+  const maxpOut = copyOf(font.requireTable('maxp'));
+  if (maxpOut.length >= 6) {
+    maxpOut[4] = (newNumGlyphs >> 8) & 0xff;
+    maxpOut[5] = newNumGlyphs & 0xff;
+  }
+
+  const headOut = copyOf(font.requireTable('head'));
+  if (headOut.length >= 54) {
+    headOut[50] = 0;
+    headOut[51] = 1; // indexToLocFormat = 1 (long)
+    // checkSumAdjustment is recomputed by buildSfnt.
+    headOut[8] = headOut[9] = headOut[10] = headOut[11] = 0;
+  }
+
+  // --- cmap --------------------------------------------------------------
+  const newCmap = new Map<number, number>();
+  for (const [cp, oldGid] of keptMapping) {
+    const ng = glyphMap.get(oldGid);
+    if (ng !== undefined && ng > 0) newCmap.set(cp, ng);
+  }
+  if (newCmap.size === 0) {
+    throw new FontFormatError(
+      'none of the requested characters exist in this font, so the subset would be unusable. ' +
+        `Requested ${requested.size} codepoint(s); the font mapped none of them.`,
+    );
+  }
+  const cmapOut = buildCmap(newCmap);
+
+  // --- OS/2 --------------------------------------------------------------
+  let os2Out: Uint8Array | undefined;
+  const os2Src = font.table('OS/2');
+  if (os2Src && os2Src.length >= 68) {
+    os2Out = copyOf(os2Src);
+    const cps = [...newCmap.keys()].sort((a, b) => a - b);
+    const first = Math.min(0xffff, cps[0]!);
+    const last = Math.min(0xffff, cps[cps.length - 1]!);
+    os2Out[64] = (first >> 8) & 0xff;
+    os2Out[65] = first & 0xff;
+    os2Out[66] = (last >> 8) & 0xff;
+    os2Out[67] = last & 0xff;
+  }
+
+  // --- assemble ----------------------------------------------------------
+  const out = new Map<string, Uint8Array>();
+  out.set('head', headOut);
+  out.set('hhea', hheaOut);
+  out.set('maxp', maxpOut);
+  out.set('hmtx', hmtxOut);
+  out.set('cmap', cmapOut);
+  out.set('loca', locaOut);
+  out.set('glyf', glyfOut);
+  out.set('post', buildPostV3());
+  if (os2Out) out.set('OS/2', os2Out);
+  out.set('name', buildName(opts.familyName ?? 'Notofu Subset', 'Regular'));
+
+  if (opts.keepHinting !== false) {
+    for (const tag of ['cvt ', 'fpgm', 'prep', 'gasp']) {
+      const t = font.table(tag);
+      if (t && t.length > 0) out.set(tag, copyOf(t));
+    }
+  }
+  if (opts.keepVertical) {
+    const vhea = font.table('vhea');
+    if (vhea) {
+      const v = copyOf(vhea);
+      // numOfLongVerMetrics lives at the same offset as hhea's counterpart.
+      if (v.length >= 36) {
+        v[34] = (newNumGlyphs >> 8) & 0xff;
+        v[35] = newNumGlyphs & 0xff;
+      }
+      out.set('vhea', v);
+      // Rebuild vmtx in the new glyph order.
+      const vmtxSrc = font.table('vmtx');
+      if (vmtxSrc) {
+        const numV = Math.max(1, new DataView(vhea.buffer, vhea.byteOffset, vhea.byteLength).getUint16(34, false));
+        const vw = new Writer(newNumGlyphs * 4);
+        for (const oldGid of oldGids) {
+          const idx = Math.min(oldGid, numV - 1);
+          const at = idx * 4;
+          const adv = at + 2 <= vmtxSrc.length ? (vmtxSrc[at]! << 8) | vmtxSrc[at + 1]! : 0;
+          const tsbAt = oldGid < numV ? at + 2 : numV * 4 + (oldGid - numV) * 2;
+          let tsb = 0;
+          if (tsbAt + 2 <= vmtxSrc.length) {
+            tsb = ((vmtxSrc[tsbAt]! << 8) | vmtxSrc[tsbAt + 1]!) << 16 >> 16;
+          }
+          vw.u16(adv);
+          vw.i16(tsb);
+        }
+        out.set('vmtx', vw.finish());
+      }
+    }
+  }
+
+  const warnings: string[] = [];
+  const axes = font.variationAxes();
+  if (axes && axes.length > 0) {
+    // Subsetting keeps `glyf` (the default instance) and drops `gvar`, so the
+    // output is pinned to the default coordinates. Say so loudly rather than
+    // shipping the wrong weight in silence.
+    const described = axes
+      .map((a) => `${a.tag}=${a.default} (range ${a.min}\u2013${a.max})`)
+      .join(', ');
+    const wght = axes.find((a) => a.tag === 'wght');
+    let hint = '';
+    if (wght && wght.default !== 400 && wght.min <= 400 && wght.max >= 400) {
+      hint =
+        ` This font's default weight is ${wght.default}, not the usual 400, so the subset will look ` +
+        `${wght.default < 400 ? 'lighter' : 'heavier'} than Regular. ` +
+        'Use a static instance instead — `fetchGoogleFont(family, { weight: 400 })` returns one, ' +
+        'or run `fonttools varLib.instancer font.ttf wght=400`.';
+    }
+    warnings.push(
+      `Variable font: only the default instance is kept (${described}).` + hint,
+    );
+  }
+
+  const built = buildSfnt(0x00010000, out);
+  return {
+    font: built,
+    originalSize: source.length,
+    subsetSize: built.length,
+    originalGlyphCount: font.numGlyphs,
+    glyphCount: newNumGlyphs,
+    mappedCodepoints: mapped,
+    missingCodepoints: missing,
+    glyphMap,
+    warnings,
+  };
+}

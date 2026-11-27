@@ -180,3 +180,6 @@ AGPL-3.0-or-later。Google / Bing 与其余服务适配器参考并改编自
 - @pdf-lib/fontkit（MIT）、Noto Sans CJK SC（SIL OFL 1.1）：字体依赖及许可证按构建分发。诊断报告不自动上传。
 
 字体兼容性回归：第8项实测发现 CFF/OTF 子集可提取但在 MuPDF 中无可见中文字形；构建改用同一固定上游提交的 Noto Sans SC TrueType 变体，保留原有中文可见性检查，待 CI 验证。Fontkit 上游 MIT 授权全文已补入 addon/content/licenses/pdf-export-dependencies.txt。
+
+### 字形子集兼容性修复
+旧版 @pdf-lib/fontkit 的 CJK 子集生成在实际 PDF 中导致可检索但不可见的字符（OTF/TTF 均已复现）。引入 [notofu](https://github.com/Ax1zz/notofu/tree/123ebf7d53b194f16c477e73a50a67bea0b5c0fc) 的纯 TrueType 子集核心（MIT，固定提交，仅五个源码文件，本地改动仅导入扩展名及来源声明），先生成有效字体子集再通过 pdf-lib subset:false 嵌入。字体子集采用 BilingualReaderCJK 名称；Noto 原字体 OFL 授权仍适用。notofu 原始 MIT 授权见 addon/content/licenses/notofu.txt。保留真实字形像素和续页验收，不以文字提取替代可见性。
